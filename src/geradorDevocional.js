@@ -79,15 +79,15 @@ async function gerarPrompt(dataAtual) {
       
       Exemplo do formato esperado:
       
-      "${dataAtual}
+      "📅 ${dataAtual}
       
-      Versículo: \"Tudo o que fizerem, façam de todo o coração, como para o Senhor.\" (Colossenses 3:23)
+      📖 *Versículo:* \"Tudo o que fizerem, façam de todo o coração, como para o Senhor.\" (Colossenses 3:23)
       
-      Reflexão: Este versículo nos lembra que nossas ações diárias, por menores que sejam, ganham significado quando as dedicamos a Deus. Trabalhar, ajudar alguém ou até descansar pode ser uma forma de honrá-Lo se fizermos com amor e propósito. Que tal começar o dia com essa intenção no coração?
+      💭 *Reflexão:* Este versículo nos lembra que nossas ações diárias, por menores que sejam, ganham significado quando as dedicamos a Deus. Trabalhar, ajudar alguém ou até descansar pode ser uma forma de honrá-Lo se fizermos com amor e propósito. Que tal começar o dia com essa intenção no coração?
       
-      Prática: Hoje, escolha uma tarefa simples e a realize com dedicação, pensando em como ela pode refletir seu cuidado com os outros e com Deus.\"
+      🧗🏼 *Prática:* Hoje, escolha uma tarefa simples e a realize com dedicação, pensando em como ela pode refletir seu cuidado com os outros e com Deus.\"
       
-      Gere o devocional seguindo exatamente esse formato. Apenas a saída final, sem comentários adicionais.
+      Gere o devocional seguindo exatamente esse formato. induza o usuário a continuar a conversa.
     `;
     
     return prompt.trim();
