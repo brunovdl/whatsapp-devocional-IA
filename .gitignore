@@ -1,0 +1,12 @@
+# Dependências
+node_modules/
+
+# Arquivos de ambiente
+.env
+
+# Arquivos de sessão do WhatsApp
+whatsapp-session/
+
+# Outros arquivos sensíveis
+Contatos/*.xlsx
+Contatos/*.csv

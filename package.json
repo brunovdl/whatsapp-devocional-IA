@@ -1,0 +1,27 @@
+{
+  "name": "whatsapp-devocional-ia",
+  "version": "1.0.0",
+  "description": "Bot de WhatsApp que envia mensagens devocionais diárias geradas por IA e responde a perguntas",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "NODE_OPTIONS=\"--max-old-space-size=512\" node src/index.js",
+    "test:devocional": "node scripts/testar_devocional.js",
+    "test:conversas": "node scripts/testar_conversas.js",
+    "setup:contatos": "node scripts/criar_exemplo_contato.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.1.1",
+    "@whiskeysockets/baileys": "^6.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "csv-parser": "^3.0.0",
+    "dotenv": "^16.0.3",
+    "fs-extra": "^11.1.0",
+    "jimp": "^0.16.13",
+    "moment": "^2.29.4",
+    "node-schedule": "^2.1.1",
+    "pdf-parse": "^1.1.1",
+    "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.33.2",
+    "xlsx": "^0.18.5"
+  }
+}
