@@ -159,23 +159,62 @@ function registrarEnvio(dados) {
 }
 
 // Obter versículos usados recentemente (para evitar repetições)
-function obterVersiculosRecentes(dias = 30) {
+function obterVersiculosRecentes(dias = 7) {
   try {
     const historico = carregarHistorico();
     const dataLimite = new Date();
     dataLimite.setDate(dataLimite.getDate() - dias);
+
+    // Adicionar log para debug
+    logger.info(`Verificando versículos usados nos últimos ${dias} dias`);
     
     const versiculosRecentes = historico.mensagens
       .filter(msg => {
+        if (!msg.data || !msg.versiculo) return false;
         const dataMensagem = new Date(msg.data);
-        return dataMensagem >= dataLimite && msg.versiculo;
+        return isRecente = dataMensagem >= dataLimite;
+
+        // Log para cada entrada
+        if (isRecente && msg.versiculo) {
+          logger.info(`Versículo recente encontrado: ${msg.versiculo.referencia} usado em ${dataMensagem.toISOString()}`);
+        }
+        return isRecente && msg.versiculo
       })
       .map(msg => msg.versiculo);
     
+    logger.info(`Total de ${versiculosRecentes.length} versículos recentes encontrados`);
     return versiculosRecentes;
   } catch (erro) {
     logger.error(`Erro ao obter versículos recentes: ${erro.message}`);
     return [];
+  }
+}
+
+// Verificar se um versículo foi usado recentemente
+function versiculoFoiUsadoRecentemente(referencia, dias = 7) { // Aumentei para 7 dias
+  try {
+    const versiculosRecentes = obterVersiculosRecentes(dias);
+    
+    // Normalizar a referência para comparação (remover espaços e converter para minúsculas)
+    const referenciaFormatada = referencia.replace(/\s+/g, '').toLowerCase();
+    
+    const encontrado = versiculosRecentes.some(versiculo => {
+      if (!versiculo || !versiculo.referencia) return false;
+      
+      const versiculoFormatado = versiculo.referencia.replace(/\s+/g, '').toLowerCase();
+      const isMatch = versiculoFormatado === referenciaFormatada;
+      
+      if (isMatch) {
+        logger.info(`Versículo ${referencia} já foi usado recentemente`);
+      }
+      
+      return isMatch;
+    });
+    
+    return encontrado;
+  } catch (erro) {
+    logger.error(`Erro ao verificar versículo: ${erro.message}`);
+    return false;
   }
 }
 

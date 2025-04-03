@@ -44,10 +44,17 @@ async function gerarPrompt(dataAtual) {
     const baseConhecimento = await leitorDocumentos.obterConteudoBase();
     
     // Obter versículos recentes (para evitar repetições)
-    const versiculosRecentes = historicoMensagens.obterVersiculosRecentes();
+    const versiculosRecentes = historicoMensagens.obterVersiculosRecentes(10); // Aumentei para 10 dias
     const versiculosRecentesTexto = versiculosRecentes
-      .map(v => `${v.referencia}: "${v.texto}"`)
+      .map(v => {
+        if (!v || !v.referencia || !v.texto) return '';
+        return `${v.referencia}: "${v.texto}"`;
+      })
+      .filter(v => v) // Remove entradas vazias
       .join('\n');
+    
+    // Adicionar log para debug
+    logger.info(`Versículos a serem evitados: ${versiculosRecentesTexto || "Nenhum"}`);
     
     // Construir o prompt
     const prompt = `
@@ -59,12 +66,14 @@ async function gerarPrompt(dataAtual) {
       3. Um texto explicativo sobre o versículo (3-5 frases)
       4. Uma sugestão prática para o dia (1-2 frases)
       
+      MUITO IMPORTANTE: Você deve gerar um devocional com um versículo diferente a cada dia. Nunca repita versículos que já foram usados recentemente.
+      
       Baseie-se no seguinte conteúdo para selecionar o versículo e elaborar a reflexão:
       
       ${baseConhecimento.substring(0, 15000)} 
       
-      Evite usar os seguintes versículos que foram utilizados recentemente:
-      ${versiculosRecentesTexto}
+      Evite usar ABSOLUTAMENTE os seguintes versículos que foram utilizados recentemente:
+      ${versiculosRecentesTexto || "Nenhum versículo recente a evitar."}
       
       O tom deve ser amigável, acolhedor e espiritual.
       
@@ -72,19 +81,99 @@ async function gerarPrompt(dataAtual) {
       
       "${dataAtual}
       
-      ✝️ *Versículo:* "Tudo o que fizerem, façam de todo o coração, como para o Senhor." (Colossenses 3:23)
+      Versículo: \"Tudo o que fizerem, façam de todo o coração, como para o Senhor.\" (Colossenses 3:23)
       
-      💭 *Reflexão:* Este versículo nos lembra que nossas ações diárias, por menores que sejam, ganham significado quando as dedicamos a Deus. Trabalhar, ajudar alguém ou até descansar pode ser uma forma de honrá-Lo se fizermos com amor e propósito. Que tal começar o dia com essa intenção no coração?
+      Reflexão: Este versículo nos lembra que nossas ações diárias, por menores que sejam, ganham significado quando as dedicamos a Deus. Trabalhar, ajudar alguém ou até descansar pode ser uma forma de honrá-Lo se fizermos com amor e propósito. Que tal começar o dia com essa intenção no coração?
       
-      🧗🏻 *Prática:* Hoje, escolha uma tarefa simples e a realize com dedicação, pensando em como ela pode refletir seu cuidado com os outros e com Deus."
+      Prática: Hoje, escolha uma tarefa simples e a realize com dedicação, pensando em como ela pode refletir seu cuidado com os outros e com Deus.\"
       
-      Gere o devocional seguindo exatamente esse formato. Apenas a saída final, induza o usuário a continuar conversando.
+      Gere o devocional seguindo exatamente esse formato. Apenas a saída final, sem comentários adicionais.
     `;
     
     return prompt.trim();
   } catch (erro) {
     logger.error(`Erro ao gerar prompt: ${erro.message}`);
     throw erro;
+  }
+}
+
+// Modifique a função gerarDevocional para incluir a validação
+async function gerarDevocional(dataAtual) {
+  try {
+    // Verificar se a API foi inicializada corretamente
+    if (!geminiModel) {
+      logger.warn('API do Gemini não inicializada. Tentando inicializar novamente...');
+      
+      // Tentar inicializar novamente
+      const inicializou = inicializarGeminiAPI();
+      
+      if (!inicializou || !geminiModel) {
+        throw new Error('Falha ao inicializar API do Gemini. Verifique a chave de API.');
+      }
+    }
+    
+    // Contador de tentativas para evitar loop infinito
+    let tentativas = 0;
+    const maxTentativas = 3;
+    let devocionalValido = false;
+    let devocional = '';
+    
+    while (!devocionalValido && tentativas < maxTentativas) {
+      tentativas++;
+      logger.info(`Gerando devocional - tentativa ${tentativas}/${maxTentativas}`);
+      
+      // Gerar o prompt com os versículos a serem evitados
+      const prompt = await gerarPrompt(dataAtual);
+      
+      try {
+        const result = await geminiModel.generateContent({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7 + (tentativas * 0.1), // Aumentar a temperatura a cada tentativa
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 1024,
+          },
+        });
+        
+        const response = result.response;
+        devocional = response.text().trim();
+        
+        // Verificar se o devocional foi gerado corretamente
+        if (!devocional || devocional.length < 50) {
+          logger.warn('Devocional gerado muito curto ou vazio. Tentando novamente.');
+          continue;
+        }
+        
+        // Validar se o versículo não foi usado recentemente
+        devocionalValido = await validarDevocionalGerado(devocional);
+        
+        if (devocionalValido) {
+          logger.info('Devocional válido gerado com sucesso');
+          return devocional;
+        } else {
+          logger.warn('Devocional gerado usa versículo repetido. Tentando novamente.');
+        }
+      } catch (erroGemini) {
+        logger.warn(`Erro com o modelo na tentativa ${tentativas}: ${erroGemini.message}`);
+        
+        if (tentativas >= maxTentativas) {
+          logger.error('Número máximo de tentativas atingido. Usando fallback.');
+          return gerarDevocionalFallback(dataAtual);
+        }
+      }
+    }
+    
+    // Se chegou aqui sem um devocional válido, usar fallback
+    if (!devocionalValido) {
+      logger.warn('Não foi possível gerar um devocional com versículo único. Usando fallback.');
+      return gerarDevocionalFallback(dataAtual);
+    }
+    
+    return devocional;
+  } catch (erro) {
+    logger.error(`Erro ao gerar devocional: ${erro.message}`);
+    return gerarDevocionalFallback(dataAtual);
   }
 }
 
