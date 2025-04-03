@@ -1,0 +1,21 @@
+# Pastas para excluir
+node_modules
+.venv
+.wwebjs_auth
+.wwebjs_cache
+Base_de_conhecimento
+whatsapp-session
+Conversas
+Contatos
+
+# Arquivos específicos para excluir
+.env
+exclusion.txt
+package-lock.json
+app.py
+
+# Padrões para excluir (começando com 'pattern:')
+pattern: *.log
+pattern: *.tmp
+pattern: temp/*
+pattern: __pycache__/**

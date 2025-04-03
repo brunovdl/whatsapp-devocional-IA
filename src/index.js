@@ -72,6 +72,15 @@ async function enviarDevocionaisDiarios() {
     });
     
     logger.info(`Processo concluído. Enviado para ${enviosComSucesso}/${contatos.length} contatos.`);
+    
+    // Verificar o versículo que foi enviado (para debug)
+    const versiculo = historicoMensagens.extrairVersiculo(devocional);
+    if (versiculo) {
+      logger.info(`Versículo enviado hoje: ${versiculo.referencia} - "${versiculo.texto}"`);
+    } else {
+      logger.warn('Não foi possível extrair o versículo do devocional enviado');
+    }
+    
   } catch (erro) {
     logger.error(`Erro ao executar o processo de envio: ${erro.message}`);
     logger.error(erro.stack);
@@ -120,7 +129,11 @@ async function iniciarSistema() {
     logger.info(`Sistema iniciado. Devocionais serão enviados diariamente às ${horarioEnvio}`);
     
     // Para desenvolvimento/testes: Descomentar para enviar um devocional imediatamente
-     setTimeout(enviarDevocionaisDiarios, 10000);
+    const enviarImediatamente = process.env.ENVIAR_IMEDIATAMENTE === 'true';
+    if (enviarImediatamente) {
+      logger.info('Configurado para enviar devocional imediatamente. Iniciando envio em 10 segundos...');
+      setTimeout(enviarDevocionaisDiarios, 10000);
+    }
   } catch (erro) {
     logger.error(`Erro ao iniciar o sistema: ${erro.message}`);
     logger.error(erro.stack);

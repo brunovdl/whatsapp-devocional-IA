@@ -1,91 +1,12 @@
-// Módulo para gerenciamento do histórico de mensagens enviadas
+// Módulo para gerenciamento do histórico de mensagens enviadas (Refatorado)
 
 const fs = require('fs-extra');
 const path = require('path');
 const { logger } = require('./utils');
+const historicoManager = require('./historicoManager');
 
 // Configurações do histórico
-const HISTORICO_DIR = process.env.HISTORICO_DIR || './Histórico';
-const HISTORICO_FILE = process.env.HISTORICO_FILE || './Histórico/historico.json';
 const MAX_HISTORICO_DIAS = parseInt(process.env.MAX_HISTORICO_DIAS || '90', 10);
-
-// Garantir que o diretório do histórico exista
-function garantirDiretorioHistorico() {
-  if (!fs.existsSync(HISTORICO_DIR)) {
-    fs.mkdirSync(HISTORICO_DIR, { recursive: true });
-    logger.info(`Diretório de histórico criado: ${HISTORICO_DIR}`);
-  }
-  
-  if (!fs.existsSync(HISTORICO_FILE)) {
-    fs.writeFileSync(HISTORICO_FILE, JSON.stringify({
-      ultimaAtualizacao: new Date().toISOString(),
-      mensagens: []
-    }, null, 2));
-    logger.info(`Arquivo de histórico criado: ${HISTORICO_FILE}`);
-  }
-}
-
-// Carregar o histórico de mensagens
-function carregarHistorico() {
-  try {
-    garantirDiretorioHistorico();
-    
-    // Verificar se o arquivo existe e tem conteúdo válido
-    if (fs.existsSync(HISTORICO_FILE)) {
-      const conteudo = fs.readFileSync(HISTORICO_FILE, 'utf8');
-      if (conteudo && conteudo.trim()) {
-        const historico = JSON.parse(conteudo);
-        // Garantir que o objeto tem a estrutura esperada
-        if (!historico.mensagens) {
-          historico.mensagens = [];
-        }
-        return historico;
-      }
-    }
-    
-    // Se o arquivo não existir, estiver vazio ou não tiver a estrutura esperada
-    const historicoVazio = {
-      ultimaAtualizacao: new Date().toISOString(),
-      mensagens: []
-    };
-    
-    // Salvar o histórico vazio para garantir consistência
-    fs.writeFileSync(HISTORICO_FILE, JSON.stringify(historicoVazio, null, 2));
-    
-    return historicoVazio;
-  } catch (erro) {
-    logger.error(`Erro ao carregar histórico: ${erro.message}`);
-    // Retornar um histórico vazio em caso de erro
-    const historicoVazio = {
-      ultimaAtualizacao: new Date().toISOString(),
-      mensagens: []
-    };
-    
-    // Tentar salvar o histórico vazio
-    try {
-      fs.writeFileSync(HISTORICO_FILE, JSON.stringify(historicoVazio, null, 2));
-    } catch (erroSalvar) {
-      logger.error(`Erro ao salvar histórico vazio: ${erroSalvar.message}`);
-    }
-    
-    return historicoVazio;
-  }
-}
-
-// Salvar o histórico de mensagens
-function salvarHistorico(historico) {
-  try {
-    garantirDiretorioHistorico();
-    
-    // Atualizar a data da última atualização
-    historico.ultimaAtualizacao = new Date().toISOString();
-    
-    fs.writeFileSync(HISTORICO_FILE, JSON.stringify(historico, null, 2));
-    logger.info('Histórico salvo com sucesso');
-  } catch (erro) {
-    logger.error(`Erro ao salvar histórico: ${erro.message}`);
-  }
-}
 
 // Limpar mensagens antigas do histórico
 function limparHistoricoAntigo(historico) {
@@ -103,7 +24,7 @@ function limparHistoricoAntigo(historico) {
     if (mensagensRemovidas > 0) {
       logger.info(`Removidas ${mensagensRemovidas} mensagens antigas do histórico`);
       historico.mensagens = mensagensRecentes;
-      salvarHistorico(historico);
+      historicoManager.salvarHistorico(historico);
     }
     
     return historico;
@@ -116,17 +37,24 @@ function limparHistoricoAntigo(historico) {
 // Extrair versículos de uma mensagem devocional
 function extrairVersiculo(devocional) {
   try {
-    // Procurar o padrão de versículo na mensagem
-    const regexVersiculo = /Versículo:\s*["'](.+?)["']\s*\((.+?)\)/i;
+    if (!devocional) {
+      logger.warn('Tentativa de extrair versículo de um devocional vazio ou nulo');
+      return null;
+    }
+    
+    // Procurar o padrão de versículo na mensagem (melhorado para capturar mais formatos)
+    const regexVersiculo = /(?:Versículo|Vers[ií]culo|\*Versículo\*|📖.*?Vers[ií]culo):\s*[\"'](.+?)[\"']\s*\((.+?)\)/i;
     const match = devocional.match(regexVersiculo);
     
     if (match && match.length >= 3) {
+      logger.info(`Versículo extraído com sucesso: "${match[1]}" (${match[2]})`);
       return {
         texto: match[1].trim(),
         referencia: match[2].trim()
       };
     }
     
+    logger.warn(`Não foi possível extrair versículo do texto: "${devocional.substring(0, 100)}..."`);
     return null;
   } catch (erro) {
     logger.error(`Erro ao extrair versículo: ${erro.message}`);
@@ -137,9 +65,19 @@ function extrairVersiculo(devocional) {
 // Registrar um envio no histórico
 function registrarEnvio(dados) {
   try {
-    const historico = carregarHistorico();
+    // Usar o historicoManager para carregar o histórico
+    const historico = historicoManager.carregarHistorico();
+    
+    // Extrair informações do versículo do devocional
     const versiculo = extrairVersiculo(dados.devocional);
     
+    if (versiculo) {
+      logger.info(`Versículo encontrado para registro: ${versiculo.referencia}`);
+    } else {
+      logger.warn('Nenhum versículo encontrado no devocional para registro');
+    }
+    
+    // Adicionar nova entrada ao histórico
     historico.mensagens.push({
       data: dados.data,
       devocional: dados.devocional,
@@ -152,37 +90,80 @@ function registrarEnvio(dados) {
     // Limpar mensagens antigas antes de salvar
     limparHistoricoAntigo(historico);
     
+    // Salvar o histórico atualizado
+    historicoManager.salvarHistorico(historico);
+    
     logger.info('Envio registrado no histórico com sucesso');
+    return true;
   } catch (erro) {
     logger.error(`Erro ao registrar envio no histórico: ${erro.message}`);
+    return false;
   }
 }
 
 // Obter versículos usados recentemente (para evitar repetições)
 function obterVersiculosRecentes(dias = 7) {
   try {
-    const historico = carregarHistorico();
+    // Usar o historicoManager para carregar o histórico
+    const historico = historicoManager.carregarHistorico();
+    
     const dataLimite = new Date();
     dataLimite.setDate(dataLimite.getDate() - dias);
 
     // Adicionar log para debug
     logger.info(`Verificando versículos usados nos últimos ${dias} dias`);
+    logger.info(`Histórico contém ${historico.mensagens.length} mensagens no total`);
     
-    const versiculosRecentes = historico.mensagens
-      .filter(msg => {
-        if (!msg.data || !msg.versiculo) return false;
-        const dataMensagem = new Date(msg.data);
-        return isRecente = dataMensagem >= dataLimite;
-
-        // Log para cada entrada
-        if (isRecente && msg.versiculo) {
-          logger.info(`Versículo recente encontrado: ${msg.versiculo.referencia} usado em ${dataMensagem.toISOString()}`);
+    const versiculosRecentes = [];
+    
+    for (const msg of historico.mensagens) {
+      try {
+        if (!msg.data || !msg.versiculo) continue;
+        
+        // Converter a data do formato brasileiro "D de MMMM de YYYY" ou usar o timestamp
+        let dataMensagem;
+        if (msg.timestamp) {
+          dataMensagem = new Date(msg.timestamp);
+        } else {
+          // Tentar converter a data no formato brasileiro
+          const partes = msg.data.match(/(\d+) de (\w+) de (\d+)/);
+          if (partes && partes.length >= 4) {
+            const meses = {"janeiro":0, "fevereiro":1, "março":2, "abril":3, "maio":4, "junho":5, 
+                           "julho":6, "agosto":7, "setembro":8, "outubro":9, "novembro":10, "dezembro":11};
+            dataMensagem = new Date(
+              parseInt(partes[3]),  // Ano
+              meses[partes[2].toLowerCase()], // Mês
+              parseInt(partes[1])   // Dia
+            );
+          } else {
+            // Se não conseguir converter, usar a data atual
+            logger.warn(`Não foi possível converter a data: ${msg.data}`);
+            dataMensagem = new Date();
+          }
         }
-        return isRecente && msg.versiculo
-      })
-      .map(msg => msg.versiculo);
+        
+        const isRecente = dataMensagem >= dataLimite;
+        
+        // Log detalhado para cada mensagem recente
+        if (isRecente && msg.versiculo && msg.versiculo.referencia) {
+          logger.info(`Versículo recente encontrado: ${msg.versiculo.referencia} usado em ${dataMensagem.toISOString()}`);
+          versiculosRecentes.push(msg.versiculo);
+        }
+      } catch (erroProcessamento) {
+        logger.error(`Erro ao processar mensagem do histórico: ${erroProcessamento.message}`);
+      }
+    }
     
     logger.info(`Total de ${versiculosRecentes.length} versículos recentes encontrados`);
+    
+    // Listar todos os versículos encontrados para debug
+    if (versiculosRecentes.length > 0) {
+      const referencias = versiculosRecentes.map(v => v.referencia).join(', ');
+      logger.info(`Versículos a serem evitados: ${referencias}`);
+    } else {
+      logger.info('Nenhum versículo recente a evitar');
+    }
+    
     return versiculosRecentes;
   } catch (erro) {
     logger.error(`Erro ao obter versículos recentes: ${erro.message}`);
@@ -191,13 +172,19 @@ function obterVersiculosRecentes(dias = 7) {
 }
 
 // Verificar se um versículo foi usado recentemente
-function versiculoFoiUsadoRecentemente(referencia, dias = 7) { // Aumentei para 7 dias
+function versiculoFoiUsadoRecentemente(referencia, dias = 30) {
   try {
+    if (!referencia) {
+      logger.warn('Tentativa de verificar referência nula ou vazia');
+      return false;
+    }
+    
     const versiculosRecentes = obterVersiculosRecentes(dias);
     
     // Normalizar a referência para comparação (remover espaços e converter para minúsculas)
     const referenciaFormatada = referencia.replace(/\s+/g, '').toLowerCase();
     
+    // Verificar se a referência está na lista de versículos recentes
     const encontrado = versiculosRecentes.some(versiculo => {
       if (!versiculo || !versiculo.referencia) return false;
       
@@ -222,13 +209,15 @@ function versiculoFoiUsadoRecentemente(referencia, dias = 7) { // Aumentei para 
 async function obterUltimoDevocionalEnviado() {
   try {
     // Tentar obter do histórico geral primeiro
-    const historico = carregarHistorico();
+    const historico = historicoManager.carregarHistorico();
     
     if (historico && historico.mensagens && historico.mensagens.length > 0) {
       // Ordenar mensagens por data (mais recente primeiro)
-      const mensagensOrdenadas = [...historico.mensagens].sort((a, b) => 
-        new Date(b.data) - new Date(a.data)
-      );
+      const mensagensOrdenadas = [...historico.mensagens].sort((a, b) => {
+        const dataA = a.timestamp ? new Date(a.timestamp) : new Date(0);
+        const dataB = b.timestamp ? new Date(b.timestamp) : new Date(0);
+        return dataB - dataA;
+      });
       
       // Verificar se o último devocional foi enviado hoje
       const hoje = new Date();
@@ -306,27 +295,10 @@ async function obterUltimoDevocionalEnviado() {
   }
 }
 
-// Verificar se um versículo foi usado recentemente
-function versiculoFoiUsadoRecentemente(referencia, dias = 30) {
-  try {
-    const versiculosRecentes = obterVersiculosRecentes(dias);
-    
-    // Normalizar a referência para comparação (remover espaços e converter para minúsculas)
-    const referenciaFormatada = referencia.replace(/\s+/g, '').toLowerCase();
-    
-    return versiculosRecentes.some(versiculo => {
-      const versiculoFormatado = versiculo.referencia.replace(/\s+/g, '').toLowerCase();
-      return versiculoFormatado === referenciaFormatada;
-    });
-  } catch (erro) {
-    logger.error(`Erro ao verificar versículo: ${erro.message}`);
-    return false;
-  }
-}
-
 module.exports = {
   registrarEnvio,
   obterVersiculosRecentes,
   versiculoFoiUsadoRecentemente,
-  obterUltimoDevocionalEnviado
+  obterUltimoDevocionalEnviado,
+  extrairVersiculo
 };

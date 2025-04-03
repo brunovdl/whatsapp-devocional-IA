@@ -22,11 +22,24 @@ function inicializarGeminiAPI() {
     
     genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     
-    // Corrigindo para usar o nome do modelo correto
-    // Verificar qual modelo está disponível (gemini-pro ou gemini-1.5-pro)
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    // Tentar usar o modelo mais avançado primeiro
+    try {
+      geminiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+      logger.info('API do Google Gemini (gemini-2.0-flash) inicializada com sucesso');
+    } catch (erro) {
+      logger.warn(`Erro ao inicializar modelo gemini-2.0-flash: ${erro.message}`);
+      // Fallback para outro modelo
+      try {
+        geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+        logger.info('API do Google Gemini (gemini-1.5-pro) inicializada com sucesso');
+      } catch (erroFallback1) {
+        logger.warn(`Erro ao inicializar modelo gemini-1.5-pro: ${erroFallback1.message}`);
+        // Segundo fallback
+        geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
+        logger.info('API do Google Gemini (gemini-pro) inicializada com sucesso');
+      }
+    }
     
-    logger.info('API do Google Gemini inicializada com sucesso');
     return true;
   } catch (erro) {
     logger.error(`Erro ao inicializar API do Gemini: ${erro.message}`);
@@ -37,6 +50,33 @@ function inicializarGeminiAPI() {
 // Tentar inicializar a API
 inicializarGeminiAPI();
 
+// Validar se o devocional gerado tem um versículo único
+async function validarDevocionalGerado(devocional) {
+  try {
+    // Extrair o versículo do devocional
+    const versiculo = historicoMensagens.extrairVersiculo(devocional);
+    
+    if (!versiculo || !versiculo.referencia) {
+      logger.warn('Não foi possível extrair versículo do devocional gerado');
+      return false;
+    }
+    
+    // Verificar se o versículo já foi usado recentemente
+    const jaUsado = historicoMensagens.versiculoFoiUsadoRecentemente(versiculo.referencia, 30);
+    
+    if (jaUsado) {
+      logger.warn(`Versículo ${versiculo.referencia} já foi usado recentemente, rejeitando o devocional`);
+      return false;
+    }
+    
+    logger.info(`Versículo ${versiculo.referencia} é único nos últimos 30 dias`);
+    return true;
+  } catch (erro) {
+    logger.error(`Erro ao validar devocional: ${erro.message}`);
+    return false;
+  }
+}
+
 // Gerar um prompt para o Gemini
 async function gerarPrompt(dataAtual) {
   try {
@@ -44,7 +84,7 @@ async function gerarPrompt(dataAtual) {
     const baseConhecimento = await leitorDocumentos.obterConteudoBase();
     
     // Obter versículos recentes (para evitar repetições)
-    const versiculosRecentes = historicoMensagens.obterVersiculosRecentes(10); // Aumentei para 10 dias
+    const versiculosRecentes = historicoMensagens.obterVersiculosRecentes(30); // Aumentei para 30 dias
     const versiculosRecentesTexto = versiculosRecentes
       .map(v => {
         if (!v || !v.referencia || !v.texto) return '';
@@ -80,14 +120,14 @@ async function gerarPrompt(dataAtual) {
       Exemplo do formato esperado:
       
       "📅 ${dataAtual}
-      
+
       📖 *Versículo:* \"Tudo o que fizerem, façam de todo o coração, como para o Senhor.\" (Colossenses 3:23)
-      
+
       💭 *Reflexão:* Este versículo nos lembra que nossas ações diárias, por menores que sejam, ganham significado quando as dedicamos a Deus. Trabalhar, ajudar alguém ou até descansar pode ser uma forma de honrá-Lo se fizermos com amor e propósito. Que tal começar o dia com essa intenção no coração?
+
+      🧗🏼 *Prática:* Hoje, escolha uma tarefa simples e a realize com dedicação, pensando em como ela pode refletir seu cuidado com os outros e com Deus."
       
-      🧗🏼 *Prática:* Hoje, escolha uma tarefa simples e a realize com dedicação, pensando em como ela pode refletir seu cuidado com os outros e com Deus.\"
-      
-      Gere o devocional seguindo exatamente esse formato. induza o usuário a continuar a conversa.
+      Gere um devocional seguindo exatamente esse formato. Sua resposta deve conter apenas o devocional, sem introdução ou conclusão adicional.
     `;
     
     return prompt.trim();
@@ -97,7 +137,7 @@ async function gerarPrompt(dataAtual) {
   }
 }
 
-// Modifique a função gerarDevocional para incluir a validação
+// Gerar o devocional utilizando o Gemini com validação de versículo único
 async function gerarDevocional(dataAtual) {
   try {
     // Verificar se a API foi inicializada corretamente
@@ -152,7 +192,7 @@ async function gerarDevocional(dataAtual) {
           logger.info('Devocional válido gerado com sucesso');
           return devocional;
         } else {
-          logger.warn('Devocional gerado usa versículo repetido. Tentando novamente.');
+          logger.warn('Devocional gerado usa versículo repetido ou inválido. Tentando novamente.');
         }
       } catch (erroGemini) {
         logger.warn(`Erro com o modelo na tentativa ${tentativas}: ${erroGemini.message}`);
@@ -177,98 +217,46 @@ async function gerarDevocional(dataAtual) {
   }
 }
 
-// Gerar o devocional utilizando o Gemini
-async function gerarDevocional(dataAtual) {
-  try {
-    // Verificar se a API foi inicializada corretamente
-    if (!geminiModel) {
-      logger.warn('API do Gemini não inicializada. Tentando inicializar novamente...');
-      
-      // Tentar inicializar novamente
-      const inicializou = inicializarGeminiAPI();
-      
-      if (!inicializou || !geminiModel) {
-        throw new Error('Falha ao inicializar API do Gemini. Verifique a chave de API.');
-      }
-    }
-    
-    logger.info('Gerando prompt para o Gemini...');
-    const prompt = await gerarPrompt(dataAtual);
-    
-    logger.info('Solicitando geração de devocional ao Gemini...');
-    
-    try {
-      const result = await geminiModel.generateContent({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 1024,
-        },
-      });
-      
-      const response = result.response;
-      const devocional = response.text().trim();
-      
-      // Verificar se o devocional foi gerado corretamente
-      if (!devocional || devocional.length < 50) {
-        logger.warn('Devocional gerado muito curto ou vazio. Usando fallback.');
-        return gerarDevocionalFallback(dataAtual);
-      }
-      
-      logger.info('Devocional gerado com sucesso');
-      return devocional;
-    } catch (erroGemini) {
-      // Tentar usar outro modelo se o modelo atual falhar
-      logger.warn(`Erro com o modelo atual. Detalhe: ${erroGemini.message}`);
-      
-      try {
-        // Tentar com modelo alternativo
-        logger.info('Tentando modelo alternativo gemini-pro...');
-        const modeloAlternativo = genAI.getGenerativeModel({ model: "gemini-pro" });
-        
-        const resultadoAlternativo = await modeloAlternativo.generateContent({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 1024,
-          },
-        });
-        
-        const respostaAlternativa = resultadoAlternativo.response;
-        const devocionalAlternativo = respostaAlternativa.text().trim();
-        
-        logger.info('Devocional gerado com sucesso usando modelo alternativo');
-        return devocionalAlternativo;
-      } catch (erroModeloAlternativo) {
-        logger.error(`Erro também no modelo alternativo: ${erroModeloAlternativo.message}`);
-        throw new Error(`Falha em todos os modelos Gemini disponíveis`);
-      }
-    }
-  } catch (erro) {
-    logger.error(`Erro ao gerar devocional: ${erro.message}`);
-    
-    // Retornar um devocional de fallback em caso de erro
-    return gerarDevocionalFallback(dataAtual);
-  }
-}
-
 // Gerar um devocional de fallback em caso de erro na API
 function gerarDevocionalFallback(dataAtual) {
   logger.info('Gerando devocional de fallback...');
   
-  return `${dataAtual}
+  // Lista de devocionais de fallback com versículos diferentes
+  const devocionaisFallback = [
+    {
+      versiculo: "Não temas, porque eu sou contigo; não te assombres, porque eu sou teu Deus; eu te fortaleço, e te ajudo, e te sustento com a destra da minha justiça.",
+      referencia: "Isaías 41:10",
+      reflexao: "Mesmo quando enfrentamos dificuldades ou desafios inesperados, Deus está ao nosso lado, pronto para nos dar força e sustento. Este versículo nos lembra que não precisamos temer, pois temos a presença constante do Senhor em nossas vidas, guiando nossos passos e iluminando nosso caminho.",
+      pratica: "Hoje, ao enfrentar qualquer situação desafiadora, faça uma pausa, respire e relembre esta promessa de sustento divino antes de prosseguir."
+    },
+    {
+      versiculo: "Tudo posso naquele que me fortalece.",
+      referencia: "Filipenses 4:13",
+      reflexao: "Este versículo nos lembra que nossa força vem de Deus. Quando enfrentamos desafios que parecem além das nossas capacidades, não estamos sozinhos. Com o poder de Cristo, podemos superar obstáculos que sozinhos seriam impossíveis. Esta não é uma promessa de sucesso em tudo, mas de força para perseverar em todas as circunstâncias.",
+      pratica: "Identifique um desafio atual em sua vida e entregue-o em oração, reconhecendo sua dependência da força divina para superá-lo."
+    },
+    {
+      versiculo: "O Senhor é meu pastor; nada me faltará.",
+      referencia: "Salmos 23:1",
+      reflexao: "Neste belo salmo, Davi compara o cuidado de Deus ao de um pastor dedicado que supre todas as necessidades de suas ovelhas. Quando confiamos em Deus como nosso pastor, podemos descansar na certeza de que Ele conhece nossas necessidades e cuida de nós com amor e sabedoria, mesmo nos momentos mais difíceis.",
+      pratica: "Reserve um momento hoje para listar suas necessidades e agradecer a Deus pelo cuidado que Ele já está providenciando em cada área."
+    }
+  ];
+  
+  // Escolher um devocional aleatório da lista
+  const fallback = devocionaisFallback[Math.floor(Math.random() * devocionaisFallback.length)];
+  
+  // Formatar o devocional no padrão esperado
+  return `📅 ${dataAtual}
 
-*✝️ Versículo:* "Não temas, porque eu sou contigo; não te assombres, porque eu sou teu Deus; eu te fortaleço, e te ajudo, e te sustento com a destra da minha justiça." (Isaías 41:10)
+📖 *Versículo:* "${fallback.versiculo}" (${fallback.referencia})
 
-*💭 Reflexão:* Mesmo quando enfrentamos dificuldades ou desafios inesperados, Deus está ao nosso lado, pronto para nos dar força e sustento. Este versículo nos lembra que não precisamos temer, pois temos a presença constante do Senhor em nossas vidas, guiando nossos passos e iluminando nosso caminho.
+💭 *Reflexão:* ${fallback.reflexao}
 
-*🧗🏻 Prática:* Hoje, ao enfrentar qualquer situação desafiadora, faça uma pausa, respire e relembre esta promessa de sustento divino antes de prosseguir.`;
+🧗🏻 *Prática:* ${fallback.pratica}`;
 }
 
 module.exports = {
-  gerarDevocional
+  gerarDevocional,
+  validarDevocionalGerado
 };
