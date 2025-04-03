@@ -120,7 +120,7 @@ async function iniciarSistema() {
     logger.info(`Sistema iniciado. Devocionais serão enviados diariamente às ${horarioEnvio}`);
     
     // Para desenvolvimento/testes: Descomentar para enviar um devocional imediatamente
-    // setTimeout(enviarDevocionaisDiarios, 10000);
+     setTimeout(enviarDevocionaisDiarios, 10000);
   } catch (erro) {
     logger.error(`Erro ao iniciar o sistema: ${erro.message}`);
     logger.error(erro.stack);
