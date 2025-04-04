@@ -1,4 +1,4 @@
-// Módulo para gerenciamento do histórico de mensagens enviadas (Refatorado)
+// Módulo para gerenciamento do histórico de mensagens enviadas (Refatorado e corrigido)
 
 const fs = require('fs-extra');
 const path = require('path');
@@ -99,25 +99,36 @@ function registrarEnvio(dados) {
     }
     
     // Adicionar nova entrada ao histórico
-    historico.mensagens.push({
+    const novaEntrada = {
       data: dados.data,
       devocional: dados.devocional,
       versiculo: versiculo,
       totalContatos: dados.totalContatos,
       enviosComSucesso: dados.enviosComSucesso,
       timestamp: new Date().toISOString()
-    });
+    };
+    
+    // Adicionar ao histórico e log detalhado
+    historico.mensagens.push(novaEntrada);
+    logger.info(`Adicionada nova entrada ao histórico: ${novaEntrada.timestamp}`);
+    logger.info(`Histórico agora tem ${historico.mensagens.length} entradas`);
     
     // Limpar mensagens antigas antes de salvar
     limparHistoricoAntigo(historico);
     
     // Salvar o histórico atualizado
-    historicoManager.salvarHistorico(historico);
+    const salvou = historicoManager.salvarHistorico(historico);
     
-    logger.info('Envio registrado no histórico com sucesso');
-    return true;
+    if (salvou) {
+      logger.info('Envio registrado no histórico com sucesso');
+    } else {
+      logger.error('Erro ao salvar o histórico após registrar envio');
+    }
+    
+    return salvou;
   } catch (erro) {
     logger.error(`Erro ao registrar envio no histórico: ${erro.message}`);
+    logger.error(erro.stack); // Log detalhado do erro incluindo stack trace
     return false;
   }
 }
@@ -139,30 +150,10 @@ function obterVersiculosRecentes(dias = 7) {
     
     for (const msg of historico.mensagens) {
       try {
-        if (!msg.data || !msg.versiculo) continue;
+        if (!msg.timestamp || !msg.versiculo) continue;
         
-        // Converter a data do formato brasileiro "D de MMMM de YYYY" ou usar o timestamp
-        let dataMensagem;
-        if (msg.timestamp) {
-          dataMensagem = new Date(msg.timestamp);
-        } else {
-          // Tentar converter a data no formato brasileiro
-          const partes = msg.data.match(/(\d+) de (\w+) de (\d+)/);
-          if (partes && partes.length >= 4) {
-            const meses = {"janeiro":0, "fevereiro":1, "março":2, "abril":3, "maio":4, "junho":5, 
-                           "julho":6, "agosto":7, "setembro":8, "outubro":9, "novembro":10, "dezembro":11};
-            dataMensagem = new Date(
-              parseInt(partes[3]),  // Ano
-              meses[partes[2].toLowerCase()], // Mês
-              parseInt(partes[1])   // Dia
-            );
-          } else {
-            // Se não conseguir converter, usar a data atual
-            logger.warn(`Não foi possível converter a data: ${msg.data}`);
-            dataMensagem = new Date();
-          }
-        }
-        
+        // Usar o timestamp para determinar se é recente
+        const dataMensagem = new Date(msg.timestamp);
         const isRecente = dataMensagem >= dataLimite;
         
         // Log detalhado para cada mensagem recente
