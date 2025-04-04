@@ -9,11 +9,11 @@ const moment = require('moment');
 moment.locale('pt-br');
 
 // Configure o ambiente para teste
-process.env.HISTORICO_DIR = './Histórico';
-process.env.HISTORICO_FILE = './Histórico/historico.json';
+process.env.HISTORICO_DIR = '../Histórico';
+process.env.HISTORICO_FILE = '../Histórico/historico.json';
 
 // Importar funções utilitárias
-const { formatarData, logger } = require('./src/utils');
+const { formatarData, logger } = require('../src/utils');
 
 // Verificar e reparar histórico
 async function verificarHistorico() {
