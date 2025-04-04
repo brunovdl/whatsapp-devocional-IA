@@ -33,6 +33,21 @@ async function enviarDevocionaisDiarios() {
     const devocional = await geradorDevocional.gerarDevocional(dataAtual);
     logger.info('Devocional gerado com sucesso');
     
+    // IMPORTANTE: Registrar o devocional no histórico ANTES de enviá-lo
+    logger.info('Registrando devocional no histórico geral...');
+    const registroSucesso = historicoMensagens.registrarEnvio({
+      data: dataAtual,
+      devocional: devocional,
+      totalContatos: 0, // Será atualizado depois
+      enviosComSucesso: 0 // Será atualizado depois
+    });
+    
+    if (registroSucesso) {
+      logger.info('Devocional registrado com sucesso no histórico geral');
+    } else {
+      logger.error('Falha ao registrar devocional no histórico geral');
+    }
+    
     // Verificar se o cliente WhatsApp está pronto
     if (!whatsapp.clientePronto()) {
       logger.error('Cliente WhatsApp não está pronto. Tentando novamente em 5 minutos.');
@@ -63,7 +78,8 @@ async function enviarDevocionaisDiarios() {
       }
     }
     
-    // Registrar no histórico
+    // Atualizar o histórico com os números finais
+    logger.info('Atualizando dados no histórico...');
     historicoMensagens.registrarEnvio({
       data: dataAtual,
       devocional: devocional,
@@ -79,6 +95,16 @@ async function enviarDevocionaisDiarios() {
       logger.info(`Versículo enviado hoje: ${versiculo.referencia} - "${versiculo.texto}"`);
     } else {
       logger.warn('Não foi possível extrair o versículo do devocional enviado');
+    }
+    
+    // Para garantir que o sistema tenha o devocional disponível imediatamente após envio,
+    // verificar se o devocional pode ser recuperado do histórico
+    logger.info('Verificando se o devocional pode ser recuperado do histórico...');
+    const devocionalRecuperado = await historicoMensagens.obterUltimoDevocionalEnviado();
+    if (devocionalRecuperado) {
+      logger.info('Devocional pode ser recuperado do histórico com sucesso');
+    } else {
+      logger.error('PROBLEMA CRÍTICO: Não foi possível recuperar o devocional do histórico após registro');
     }
     
   } catch (erro) {

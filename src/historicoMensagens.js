@@ -223,6 +223,9 @@ async function obterUltimoDevocionalEnviado() {
     // Tentar obter do histórico geral primeiro
     const historico = historicoManager.carregarHistorico();
     
+    // Log para debug
+    logger.info(`Tentando obter devocional do histórico com ${historico.mensagens.length} mensagens`);
+    
     if (historico && historico.mensagens && historico.mensagens.length > 0) {
       // Ordenar mensagens por data (mais recente primeiro)
       const mensagensOrdenadas = [...historico.mensagens].sort((a, b) => {
@@ -235,12 +238,18 @@ async function obterUltimoDevocionalEnviado() {
       const hoje = new Date();
       const dataHoje = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
       
+      // Log para debug
+      logger.info(`Buscando devocional para hoje: ${dataHoje}`);
+      
       // Encontrar o último devocional
       for (const msg of mensagensOrdenadas) {
         if (msg.devocional) {
           // Extrair a data do timestamp
           const dataMensagem = new Date(msg.timestamp || msg.data);
           const dataMensagemStr = `${dataMensagem.getFullYear()}-${String(dataMensagem.getMonth() + 1).padStart(2, '0')}-${String(dataMensagem.getDate()).padStart(2, '0')}`;
+          
+          // Log para cada mensagem verificada
+          logger.info(`Verificando mensagem de ${dataMensagemStr}`);
           
           // Se o devocional for de hoje, retorná-lo
           if (dataMensagemStr === dataHoje) {
@@ -303,6 +312,7 @@ async function obterUltimoDevocionalEnviado() {
     return null;
   } catch (erro) {
     logger.error(`Erro ao obter último devocional: ${erro.message}`);
+    logger.error(erro.stack); // Adicionar stack trace completo para debug
     return null;
   }
 }
