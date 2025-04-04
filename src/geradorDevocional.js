@@ -156,7 +156,7 @@ async function gerarPrompt(dataAtual) {
 
       🧗🏼 *Prática:* Hoje, escolha uma tarefa simples e a realize com dedicação, pensando em como ela pode refletir seu cuidado com os outros e com Deus."
       
-      Gere um devocional seguindo exatamente esse formato. Sua resposta deve conter apenas o devocional, sem introdução, induza o usuário a continuar conversa.
+      Gere um devocional seguindo exatamente esse formato. Sua resposta deve conter apenas o devocional, sem introdução, induza o usuário a continuar a interação.
     `;
     
     return prompt.trim();
