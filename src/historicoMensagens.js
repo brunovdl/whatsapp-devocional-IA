@@ -42,58 +42,40 @@ function extrairVersiculo(devocional) {
       return null;
     }
     
-    // Exibir parte do devocional para debug
-    logger.debug(`Extracting verse from text starting with: ${devocional.substring(0, 100)}...`);
+    // Log informativo
+    logger.info(`Extraindo versículo de devocional com ${devocional.length} caracteres`);
     
-    // Regex melhorada que aceita qualquer formato de marcador e captura mais formatos de versículos
-    // Esta regex é mais tolerante com espaçamentos, símbolos e caracteres especiais
-    const regexVersiculo = /[*📖]?\s*(?:Vers[íi]culo|Vers[ií]culo):?\s*["']([^"']+)["']\s*\(([^)]+)\)/i;
-    
+    // Regex simplificada que funciona para a maioria dos formatos
+    // Captura qualquer texto entre aspas seguido por texto entre parênteses
+    const regexVersiculo = /"([^"]+)".*?\(([^)]+)\)/;
     const match = devocional.match(regexVersiculo);
     
     if (match && match.length >= 3) {
-      logger.info(`Versículo extraído com sucesso: "${match[1]}" (${match[2]})`);
+      const texto = match[1].trim();
+      const referencia = match[2].trim();
+      
+      logger.info(`Versículo extraído com sucesso: "${texto}" (${referencia})`);
       return {
-        texto: match[1].trim(),
-        referencia: match[2].trim()
+        texto: texto,
+        referencia: referencia
       };
     }
     
-    // Se a regex principal falhar, tentar um método alternativo para extrair de formatos diferentes
-    // Esta abordagem procura por padrões comuns de referências bíblicas (como Gênesis 1:1)
-    const alternativeRegex = /\(([A-Za-záàâãéèêíïóôõöúçñÁÀÂÃÉÈÍÏÓÔÕÖÚÇÑ]+\s+\d+:\d+(?:-\d+)?)\)/i;
-    const altMatch = devocional.match(alternativeRegex);
+    // Se falhar, tente uma regex ainda mais simples que apenas busca a referência bíblica
+    const referenciaRegex = /\(([A-Za-záàâãéèêíïóôõöúçñÁÀÂÃÉÈÍÏÓÔÕÖÚÇÑ]+\s+\d+:\d+(?:-\d+)?)\)/i;
+    const refMatch = devocional.match(referenciaRegex);
     
-    if (altMatch && altMatch.length >= 2) {
-      // Encontrada referência bíblica, agora vamos tentar capturar o texto
-      const referencia = altMatch[1].trim();
-      
-      // Procurar pelo texto - geralmente está entre aspas antes da referência
-      const textRegex = /"([^"]+)"\s*\([A-Za-záàâãéèêíïóôõöúçñÁÀÂÃÉÈÍÏÓÔÕÖÚÇÑ]+\s+\d+:\d+(?:-\d+)?\)/i;
-      const textMatch = devocional.match(textRegex);
-      
-      if (textMatch && textMatch.length >= 2) {
-        const texto = textMatch[1].trim();
-        logger.info(`Versículo extraído com método alternativo: "${texto}" (${referencia})`);
-        return {
-          texto: texto,
-          referencia: referencia
-        };
-      } else {
-        // Encontramos apenas a referência, mas é melhor do que nada
-        logger.info(`Apenas referência extraída: ${referencia}`);
-        return {
-          texto: "Texto não capturado",
-          referencia: referencia
-        };
-      }
+    if (refMatch && refMatch.length >= 2) {
+      const referencia = refMatch[1].trim();
+      logger.info(`Apenas referência bíblica extraída: ${referencia}`);
+      return {
+        texto: "Extraído apenas referência",
+        referencia: referencia
+      };
     }
     
-    // Se ainda não conseguiu extrair, mostrar mais informações para debug
-    logger.warn(`Não foi possível extrair versículo do texto: "${devocional.substring(0, 200).replace(/\n/g, ' ')}..."`);
-    // Mostrar o devocional completo no log para análise (limitado a 500 caracteres)
-    logger.debug(`Devocional completo (parcial): ${devocional.substring(0, 500).replace(/\n/g, ' | ')}`);
-    
+    // Log de falha
+    logger.warn(`Não foi possível extrair versículo do devocional (mostrando primeiros 100 caracteres): ${devocional.substring(0, 100)}...`);
     return null;
   } catch (erro) {
     logger.error(`Erro ao extrair versículo: ${erro.message}`);
