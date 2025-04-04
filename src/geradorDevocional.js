@@ -3,6 +3,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const leitorDocumentos = require('./leitorDocumentos');
 const historicoMensagens = require('./historicoMensagens');
+const verificadorFormato = require('./verificadorFormato');
 const { logger } = require('./utils');
 
 // Configuração da API do Gemini
@@ -77,6 +78,34 @@ async function validarDevocionalGerado(devocional) {
   }
 }
 
+// Validar e corrigir o formato do devocional gerado
+async function validarFormatoDevocional(devocional) {
+  // Verificar se o devocional tem o formato esperado
+  const { valido, mensagem } = verificadorFormato.verificarFormatoDevocional(devocional);
+  
+  if (!valido) {
+    logger.warn(`Problema com formato do devocional: ${mensagem}`);
+    
+    // Tentar corrigir o formato
+    const devocionalCorrigido = verificadorFormato.corrigirFormatoDevocional(devocional);
+    
+    // Verificar se a correção foi bem-sucedida
+    const resultadoCorrecao = verificadorFormato.verificarFormatoDevocional(devocionalCorrigido);
+    
+    if (resultadoCorrecao.valido) {
+      logger.info("Formato do devocional corrigido com sucesso");
+      return devocionalCorrigido;
+    } else {
+      logger.warn("Não foi possível corrigir o formato do devocional");
+      // Mesmo que não pudemos corrigir completamente, retornar a versão que tentamos corrigir
+      return devocionalCorrigido;
+    }
+  }
+  
+  // Se já estava no formato correto, retornar sem alterações
+  return devocional;
+}
+
 // Gerar um prompt para o Gemini
 async function gerarPrompt(dataAtual) {
   try {
@@ -127,7 +156,7 @@ async function gerarPrompt(dataAtual) {
 
       🧗🏼 *Prática:* Hoje, escolha uma tarefa simples e a realize com dedicação, pensando em como ela pode refletir seu cuidado com os outros e com Deus."
       
-      Gere um devocional seguindo exatamente esse formato. Sua resposta deve conter apenas o devocional, sem introdução ou conclusão adicional.
+      Gere um devocional seguindo exatamente esse formato. Sua resposta deve conter apenas o devocional, sem introdução, induza o usuário a continuar conversa.
     `;
     
     return prompt.trim();
@@ -178,6 +207,9 @@ async function gerarDevocional(dataAtual) {
         
         const response = result.response;
         devocional = response.text().trim();
+
+        // Validar e corrigir o formato do devocional
+        devocional = await validarFormatoDevocional(devocional);
         
         // Verificar se o devocional foi gerado corretamente
         if (!devocional || devocional.length < 50) {
@@ -258,5 +290,6 @@ function gerarDevocionalFallback(dataAtual) {
 
 module.exports = {
   gerarDevocional,
-  validarDevocionalGerado
+  validarDevocionalGerado,
+  validarFormatoDevocional
 };
