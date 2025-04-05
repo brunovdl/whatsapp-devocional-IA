@@ -1,0 +1,30 @@
+# Módulos Node.js
+node_modules/
+
+# Arquivos de ambiente
+.env
+.env.local
+.env.*.local
+
+# Arquivos de sessão do WhatsApp
+whatsapp-session/
+whatsapp-session*/
+
+# Históricos e arquivos de log
+Histórico/
+Conversas/
+*.log
+npm-debug.log*
+
+# Arquivos temporários
+temp_*
+*.tmp
+
+# Diretórios de configuração
+.idea/
+.vscode/
+*.sublime-*
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db1
