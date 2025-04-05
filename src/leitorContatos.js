@@ -1,18 +1,27 @@
-// Módulo para leitura da lista de contatos de arquivos Excel ou CSV
+// Módulo para leitura da lista de contatos de arquivos Excel ou CSV (Otimizado)
 
 const fs = require('fs-extra');
 const path = require('path');
 const xlsx = require('xlsx');
 const csvParser = require('csv-parser');
-const { adicionarNovoContatoNaPlanilha } = require('./adicionarContato');
 const { logger } = require('./utils');
 
 // Diretório de contatos
 const CONTATOS_DIR = process.env.CONTATOS_DIR || './Contatos';
 
+// Cache de contatos para evitar releitura frequente
+let contatosCache = null;
+let ultimaAtualizacaoContatos = null;
+
 // Obter a lista de arquivos de contatos disponíveis
 function obterArquivosContatos() {
   try {
+    if (!fs.existsSync(CONTATOS_DIR)) {
+      fs.mkdirSync(CONTATOS_DIR, { recursive: true });
+      logger.info(`Diretório de contatos criado: ${CONTATOS_DIR}`);
+      return [];
+    }
+    
     const arquivos = fs.readdirSync(CONTATOS_DIR);
     return arquivos.filter(arquivo => {
       const extensao = path.extname(arquivo).toLowerCase();
@@ -24,10 +33,36 @@ function obterArquivosContatos() {
   }
 }
 
+// Verificar se é necessário atualizar o cache de contatos
+function verificarCacheContatos() {
+  if (!contatosCache || !ultimaAtualizacaoContatos) {
+    return false;
+  }
+  
+  try {
+    const arquivos = obterArquivosContatos();
+    
+    // Verificar se algum arquivo foi modificado desde a última atualização
+    for (const arquivo of arquivos) {
+      const caminhoArquivo = path.join(CONTATOS_DIR, arquivo);
+      const stats = fs.statSync(caminhoArquivo);
+      
+      if (stats.mtime > ultimaAtualizacaoContatos) {
+        return false;
+      }
+    }
+    
+    return true;
+  } catch (erro) {
+    logger.error(`Erro ao verificar cache de contatos: ${erro.message}`);
+    return false;
+  }
+}
+
 // Ler contatos de um arquivo Excel
 async function lerContatosExcel(caminhoArquivo) {
   try {
-    logger.info(`Lendo arquivo Excel: ${caminhoArquivo}`);
+    logger.debug(`Lendo arquivo Excel: ${path.basename(caminhoArquivo)}`);
     
     // Opções adicionais para melhorar a leitura
     const workbook = xlsx.readFile(caminhoArquivo, {
@@ -45,13 +80,13 @@ async function lerContatosExcel(caminhoArquivo) {
     let todosContatos = [];
     
     for (const sheetName of workbook.SheetNames) {
-      logger.info(`Processando planilha: ${sheetName}`);
+      logger.debug(`Processando planilha: ${sheetName}`);
       
       const worksheet = workbook.Sheets[sheetName];
       
       // Verificar se a planilha tem dados
       if (!worksheet['!ref']) {
-        logger.warn(`Planilha ${sheetName} vazia, pulando...`);
+        logger.debug(`Planilha ${sheetName} vazia, pulando...`);
         continue;
       }
       
@@ -62,11 +97,10 @@ async function lerContatosExcel(caminhoArquivo) {
           raw: false   // Não converter tipos automaticamente
         });
         
-        logger.info(`Encontrados ${dados.length} registros na planilha ${sheetName}`);
+        logger.debug(`Encontrados ${dados.length} registros na planilha ${sheetName}`);
         
         if (dados.length > 0) {
           const contatos = normalizarContatos(dados);
-          logger.info(`${contatos.length} contatos válidos na planilha ${sheetName}`);
           todosContatos = todosContatos.concat(contatos);
         }
       } catch (erroLeitura) {
@@ -77,7 +111,6 @@ async function lerContatosExcel(caminhoArquivo) {
     return todosContatos;
   } catch (erro) {
     logger.error(`Erro ao ler arquivo Excel: ${erro.message}`);
-    logger.error(erro.stack);
     return [];
   }
 }
@@ -109,20 +142,18 @@ function normalizarContatos(dados) {
     return [];
   }
   
-  // Registrar os campos encontrados no primeiro registro para debug
+  // Log dos campos disponíveis para debug
   if (dados.length > 0) {
-    logger.info(`Campos encontrados na planilha: ${Object.keys(dados[0]).join(', ')}`);
+    logger.debug(`Campos disponíveis: ${Object.keys(dados[0]).join(', ')}`);
   }
   
-  return dados.map(contato => {
+  // Processar todos os contatos
+  const contatosProcessados = dados.map(contato => {
     // Tentar encontrar os campos de nome e telefone, independente da capitalização
     const entradas = Object.entries(contato);
     let nome = '';
     let telefone = '';
     let ativo = true;
-    
-    // Debug para cada contato
-    logger.info(`Processando contato: ${JSON.stringify(contato)}`);
     
     for (const [chave, valor] of entradas) {
       if (!chave) continue;
@@ -131,7 +162,6 @@ function normalizarContatos(dados) {
       
       if (chaveLower.includes('nome')) {
         nome = valor;
-        logger.info(`Nome encontrado: ${nome}`);
       } else if (
         chaveLower.includes('telefone') || 
         chaveLower.includes('celular') || 
@@ -141,7 +171,6 @@ function normalizarContatos(dados) {
         chaveLower.includes('numero')
       ) {
         telefone = valor;
-        logger.info(`Telefone encontrado (original): ${telefone}`);
       } else if (
         chaveLower.includes('ativo') || 
         chaveLower.includes('status') || 
@@ -157,13 +186,12 @@ function normalizarContatos(dados) {
       }
     }
     
-    // Se não encontrar telefone, tentar encontrar algum campo que pareça ser um número de telefone
+    // Se não encontrar telefone, tentar encontrar algum campo que pareça ser um número
     if (!telefone) {
       for (const [chave, valor] of entradas) {
-        // Verificar se o valor se parece com um número de telefone (apenas dígitos e com pelo menos 8 caracteres)
+        // Verificar se o valor se parece com um número de telefone
         if (valor && typeof valor === 'string' && valor.replace(/\D/g, '').length >= 8) {
           telefone = valor;
-          logger.info(`Possível telefone encontrado no campo ${chave}: ${telefone}`);
           break;
         }
       }
@@ -178,11 +206,8 @@ function normalizarContatos(dados) {
       // Adicionar código do país (55) se não estiver presente e for um número brasileiro
       if (telefoneFormatado.length >= 10 && telefoneFormatado.length <= 11 && !telefoneFormatado.startsWith('55')) {
         telefoneFormatado = `55${telefoneFormatado}`;
-        logger.info(`Adicionado código do país: ${telefoneFormatado}`);
       }
     }
-    
-    logger.info(`Telefone formatado: ${telefoneFormatado}`);
     
     return {
       nome: nome || 'Sem nome',
@@ -195,25 +220,31 @@ function normalizarContatos(dados) {
     // Verificar se o telefone é válido (pelo menos 10 dígitos)
     const telefoneValido = contato.telefone && contato.telefone.length >= 10;
     
-    if (!telefoneValido) {
-      logger.warn(`Contato "${contato.nome}" ignorado: número de telefone inválido (${contato.telefone})`);
-    } else if (!contato.ativo) {
-      logger.info(`Contato "${contato.nome}" ignorado: está marcado como inativo`);
-    } else {
-      logger.info(`Contato válido: ${contato.nome} (${contato.telefone})`);
-    }
-    
     return telefoneValido && contato.ativo;
   });
+  
+  logger.debug(`Processados ${dados.length} contatos, encontrados ${contatosProcessados.length} válidos`);
+  return contatosProcessados;
 }
 
 // Função principal para obter todos os contatos de todos os arquivos
-async function obterContatos() {
+async function obterContatos(forcarReload = false) {
   try {
+    // Verificar se o cache é válido
+    if (!forcarReload && verificarCacheContatos()) {
+      logger.debug('Usando cache de contatos');
+      return contatosCache;
+    }
+    
     const arquivos = obterArquivosContatos();
     
     if (arquivos.length === 0) {
       logger.warn('Nenhum arquivo de contatos encontrado no diretório');
+      
+      // Atualizar o cache
+      contatosCache = [];
+      ultimaAtualizacaoContatos = new Date();
+      
       return [];
     }
     
@@ -232,7 +263,7 @@ async function obterContatos() {
         contatos = await lerContatosCsv(caminhoArquivo);
       }
       
-      logger.info(`${contatos.length} contatos válidos encontrados em ${arquivo}`);
+      logger.debug(`${contatos.length} contatos válidos em ${arquivo}`);
       todosContatos = todosContatos.concat(contatos);
     }
     
@@ -245,6 +276,10 @@ async function obterContatos() {
     const resultado = Object.values(contatosUnicos);
     logger.info(`Total de ${resultado.length} contatos únicos encontrados`);
     
+    // Atualizar o cache
+    contatosCache = resultado;
+    ultimaAtualizacaoContatos = new Date();
+    
     return resultado;
   } catch (erro) {
     logger.error(`Erro ao obter contatos: ${erro.message}`);
@@ -252,7 +287,257 @@ async function obterContatos() {
   }
 }
 
+// Adicionar um novo contato à planilha
+async function adicionarNovoContatoNaPlanilha(telefone, nomeContato = "Novo Contato") {
+  try {
+    const arquivos = obterArquivosContatos();
+    
+    if (arquivos.length === 0) {
+      logger.info('Nenhum arquivo de contatos encontrado. Criando novo arquivo.');
+      return criarNovoArquivoContatos(telefone, nomeContato);
+    }
+    
+    // Usar o primeiro arquivo encontrado
+    const arquivoContatos = path.join(CONTATOS_DIR, arquivos[0]);
+    const extensao = path.extname(arquivoContatos).toLowerCase();
+    
+    let resultado = false;
+    
+    // Verificar se é Excel ou CSV
+    if (extensao === '.xlsx') {
+      resultado = await adicionarContatoExcel(arquivoContatos, telefone, nomeContato);
+    } else if (extensao === '.csv') {
+      resultado = await adicionarContatoCsv(arquivoContatos, telefone, nomeContato);
+    } else {
+      logger.error(`Formato de arquivo não suportado: ${extensao}`);
+      return false;
+    }
+    
+    // Se o contato foi adicionado, invalidar o cache
+    if (resultado) {
+      contatosCache = null;
+      ultimaAtualizacaoContatos = null;
+    }
+    
+    return resultado;
+  } catch (erro) {
+    logger.error(`Erro ao adicionar novo contato ${telefone}: ${erro.message}`);
+    return false;
+  }
+}
+
+// Adicionar contato a um arquivo Excel
+async function adicionarContatoExcel(caminhoArquivo, telefone, nomeContato) {
+  try {
+    logger.info(`Adicionando contato ${telefone} ao arquivo Excel`);
+    
+    // Formatar o telefone conforme o padrão
+    const telefoneFormatado = formatarTelefone(telefone);
+    
+    // Ler o arquivo Excel existente
+    const workbook = xlsx.readFile(caminhoArquivo, {
+      cellDates: true,
+      cellNF: true,
+      cellText: true
+    });
+    
+    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+      logger.error('Arquivo Excel sem planilhas');
+      return false;
+    }
+    
+    // Usar a primeira planilha
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    
+    // Converter para JSON para manipulação
+    const dados = xlsx.utils.sheet_to_json(worksheet, {
+      defval: '',
+      raw: false
+    });
+    
+    // Verificar se o contato já existe
+    const contatoExistente = dados.some(contato => {
+      // Normalizar números de telefone para comparação
+      const telefoneExistente = String(contato.Telefone || '').replace(/\D/g, '');
+      const telefoneNovo = telefoneFormatado.replace(/\D/g, '');
+      
+      return telefoneExistente === telefoneNovo || 
+             telefoneExistente === telefoneNovo.replace(/^55/, '') || 
+             `55${telefoneExistente}` === telefoneNovo;
+    });
+    
+    if (contatoExistente) {
+      logger.debug(`Contato ${telefone} já existe na planilha`);
+      return false;
+    }
+    
+    // Adicionar o novo contato
+    const novoContato = {
+      Nome: nomeContato,
+      Telefone: telefoneFormatado,
+      Ativo: 'Sim',
+      Observacoes: `Adicionado automaticamente em ${new Date().toLocaleDateString()}`
+    };
+    
+    dados.push(novoContato);
+    
+    // Converter de volta para planilha
+    const novaWorksheet = xlsx.utils.json_to_sheet(dados);
+    workbook.Sheets[sheetName] = novaWorksheet;
+    
+    // Salvar o arquivo atualizado
+    xlsx.writeFile(workbook, caminhoArquivo);
+    
+    logger.info(`Novo contato ${telefoneFormatado} (${nomeContato}) adicionado à planilha`);
+    return true;
+  } catch (erro) {
+    logger.error(`Erro ao adicionar contato no Excel: ${erro.message}`);
+    return false;
+  }
+}
+
+// Adicionar contato a um arquivo CSV
+async function adicionarContatoCsv(caminhoArquivo, telefone, nomeContato) {
+  try {
+    logger.info(`Adicionando contato ${telefone} ao arquivo CSV`);
+    
+    // Formatar o telefone conforme o padrão
+    const telefoneFormatado = formatarTelefone(telefone);
+    
+    // Ler o arquivo CSV existente
+    const contatos = await new Promise((resolve, reject) => {
+      const linhas = [];
+      
+      fs.createReadStream(caminhoArquivo)
+        .pipe(csvParser())
+        .on('data', (row) => {
+          linhas.push(row);
+        })
+        .on('end', () => {
+          resolve(linhas);
+        })
+        .on('error', (erro) => {
+          reject(erro);
+        });
+    });
+    
+    // Verificar se o contato já existe
+    const contatoExistente = contatos.some(contato => {
+      // Normalizar números de telefone para comparação
+      const telefoneExistente = String(contato.Telefone || '').replace(/\D/g, '');
+      const telefoneNovo = telefoneFormatado.replace(/\D/g, '');
+      
+      return telefoneExistente === telefoneNovo || 
+             telefoneExistente === telefoneNovo.replace(/^55/, '') || 
+             `55${telefoneExistente}` === telefoneNovo;
+    });
+    
+    if (contatoExistente) {
+      logger.debug(`Contato ${telefone} já existe no arquivo CSV`);
+      return false;
+    }
+    
+    // Adicionar o novo contato
+    const novoContato = {
+      Nome: nomeContato,
+      Telefone: telefoneFormatado,
+      Ativo: 'Sim',
+      Observacoes: `Adicionado automaticamente em ${new Date().toLocaleDateString()}`
+    };
+    
+    contatos.push(novoContato);
+    
+    // Obter os cabeçalhos
+    const cabecalhos = Object.keys(contatos[0]);
+    
+    // Criar o conteúdo CSV
+    const csvContent = [
+      cabecalhos.join(','),
+      ...contatos.map(contato => 
+        cabecalhos.map(cabecalho => 
+          `"${String(contato[cabecalho] || '').replace(/\"/g, '""')}"`)
+        .join(',')
+      )
+    ].join('\n');
+    
+    // Salvar o arquivo atualizado
+    fs.writeFileSync(caminhoArquivo, csvContent, 'utf8');
+    
+    logger.info(`Novo contato ${telefoneFormatado} (${nomeContato}) adicionado ao CSV`);
+    return true;
+  } catch (erro) {
+    logger.error(`Erro ao adicionar contato no CSV: ${erro.message}`);
+    return false;
+  }
+}
+
+// Criar novo arquivo de contatos se não existir nenhum
+function criarNovoArquivoContatos(telefone, nomeContato) {
+  try {
+    logger.info('Criando novo arquivo de contatos...');
+    
+    // Garantir que o diretório existe
+    if (!fs.existsSync(CONTATOS_DIR)) {
+      fs.mkdirSync(CONTATOS_DIR, { recursive: true });
+    }
+    
+    // Formatar o telefone conforme o padrão
+    const telefoneFormatado = formatarTelefone(telefone);
+    
+    // Criar dados iniciais
+    const contatos = [
+      {
+        Nome: nomeContato,
+        Telefone: telefoneFormatado,
+        Ativo: 'Sim',
+        Observacoes: `Adicionado automaticamente em ${new Date().toLocaleDateString()}`
+      }
+    ];
+    
+    // Criar arquivo Excel
+    const caminhoArquivo = path.join(CONTATOS_DIR, 'contatos.xlsx');
+    const workbook = xlsx.utils.book_new();
+    const worksheet = xlsx.utils.json_to_sheet(contatos);
+    
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Contatos');
+    xlsx.writeFile(workbook, caminhoArquivo);
+    
+    logger.info(`Novo arquivo de contatos criado com o contato ${telefoneFormatado}`);
+    
+    // Invalidar o cache
+    contatosCache = null;
+    ultimaAtualizacaoContatos = null;
+    
+    return true;
+  } catch (erro) {
+    logger.error(`Erro ao criar novo arquivo de contatos: ${erro.message}`);
+    return false;
+  }
+}
+
+// Função auxiliar para formatar número de telefone
+function formatarTelefone(telefone) {
+  // Remover caracteres não numéricos
+  let telefoneFormatado = String(telefone).replace(/\D/g, '');
+  
+  // Adicionar código do país (55) se não estiver presente e for um número brasileiro
+  if (telefoneFormatado.length >= 10 && telefoneFormatado.length <= 11 && !telefoneFormatado.startsWith('55')) {
+    telefoneFormatado = `55${telefoneFormatado}`;
+  }
+  
+  return telefoneFormatado;
+}
+
+// Limpar o cache de contatos
+function limparCacheContatos() {
+  contatosCache = null;
+  ultimaAtualizacaoContatos = null;
+  logger.debug('Cache de contatos limpo');
+}
+
 module.exports = {
   obterContatos,
-  adicionarNovoContatoNaPlanilha
+  adicionarNovoContatoNaPlanilha,
+  limparCacheContatos
 };

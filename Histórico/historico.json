@@ -1,10 +1,45 @@
-[
-  {
-    "date": "1 de abril de 2025",
-    "verse": "\"Confie no Senhor de todo o seu coração.\" (Provérbios 3:5)"
-  },
-  {
-    "date": "1 de abril de 2025",
-    "verse": "\"Alegrem-se na esperança, sejam pacientes na tribulação.\" (Romanos 12:12)"
-  }
-]
+{
+    "ultimaAtualizacao": "2025-04-04T17:20:37.318Z",
+    "mensagens": [
+        {
+            "data": "4 de abril de 2025",
+            "versiculo": {
+                "texto": "E criou Deus o homem à sua imagem, à imagem de Deus o criou; macho e fêmea os criou.",
+                "referencia": "Gênesis 1:27"
+            },
+            "totalContatos": 0,
+            "enviosComSucesso": 0,
+            "timestamp": "2025-04-04T16:36:59.120Z"
+        },
+        {
+            "data": "4 de abril de 2025",
+            "versiculo": {
+                "texto": "Lâmpada para os meus pés é a tua palavra, e luz para o meu caminho.",
+                "referencia": "Salmos 119:105"
+            },
+            "totalContatos": 0,
+            "enviosComSucesso": 0,
+            "timestamp": "2025-04-04T16:40:46.498Z"
+        },
+        {
+            "data": "4 de abril de 2025",
+            "versiculo": {
+                "texto": "E viu Deus tudo quanto tinha feito, e eis que era muito bom; e foi a tarde e a manhã, o dia sexto.",
+                "referencia": "Gênesis 1:31"
+            },
+            "totalContatos": 0,
+            "enviosComSucesso": 0,
+            "timestamp": "2025-04-04T17:16:52.532Z"
+        },
+        {
+            "data": "4 de abril de 2025",
+            "versiculo": {
+                "texto": "Confia no Senhor de todo o teu coração e não te estribes no teu próprio entendimento.",
+                "referencia": "Provérbios 3:5"
+            },
+            "totalContatos": 0,
+            "enviosComSucesso": 0,
+            "timestamp": "2025-04-04T17:20:37.317Z"
+        }
+    ]
+}

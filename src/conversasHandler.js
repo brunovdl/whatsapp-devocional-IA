@@ -1,20 +1,25 @@
-// Módulo para gerenciar conversas individuais com os usuários
+// Módulo para gerenciar conversas individuais com os usuários (Otimizado)
 
 const fs = require('fs-extra');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const leitorDocumentos = require('./leitorDocumentos');
-const historicoMensagens = require('./historicoMensagens');
-const { logger, removerAcentos, limparString } = require('./utils');
+const { logger, removerAcentos, dirs } = require('./utils');
 
 // Configurações
-const CONVERSAS_DIR = process.env.CONVERSAS_DIR || './Conversas';
-const MAX_HISTORICO_CONVERSAS = parseInt(process.env.MAX_HISTORICO_CONVERSAS || '10', 10);
+const CONVERSAS_DIR = process.env.CONVERSAS_DIR || dirs.CONVERSAS_DIR || './Conversas';
+const MAX_HISTORICO_CONVERSAS = parseInt(process.env.MAX_HISTORICO_CONVERSAS || '100', 10);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const MODELOS_GEMINI = [
+  "gemini-2.0-flash",
+  "gemini-pro"
+];
+const RESPOSTA_MINIMA_LENGTH = parseInt(process.env.RESPOSTA_MINIMA_LENGTH || '10', 10);
 
 // Inicializar cliente Gemini
 let genAI;
 let geminiModel;
+let modeloAtual = '';
 
 // Função para inicializar a API do Gemini
 function inicializarGeminiAPI() {
@@ -26,20 +31,23 @@ function inicializarGeminiAPI() {
     
     genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     
-    // Tentar usar o modelo mais avançado primeiro
-    try {
-      geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-      logger.info('API do Google Gemini (gemini-1.5-pro) inicializada com sucesso');
-    } catch (erro) {
-      logger.warn(`Erro ao inicializar modelo gemini-1.5-pro: ${erro.message}`);
-      // Fallback para outro modelo
-      geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
-      logger.info('API do Google Gemini (gemini-pro) inicializada com sucesso');
+    // Tentar cada modelo na ordem de preferência
+    for (const modelo of MODELOS_GEMINI) {
+      try {
+        geminiModel = genAI.getGenerativeModel({ model: modelo });
+        modeloAtual = modelo;
+        logger.info(`API do Google Gemini (${modelo}) inicializada com sucesso para conversas`);
+        return true;
+      } catch (erro) {
+        logger.warn(`Erro ao inicializar modelo ${modelo} para conversas: ${erro.message}`);
+        // Continua tentando o próximo modelo
+      }
     }
     
-    return true;
+    logger.error('Todos os modelos Gemini falharam na inicialização para conversas');
+    return false;
   } catch (erro) {
-    logger.error(`Erro ao inicializar API do Gemini: ${erro.message}`);
+    logger.error(`Erro ao inicializar API do Gemini para conversas: ${erro.message}`);
     return false;
   }
 }
@@ -98,15 +106,33 @@ function salvarHistoricoConversa(historico) {
     // Atualizar a data da última atualização
     historico.ultimaAtualizacao = new Date().toISOString();
     
-    // Limitar o número de mensagens no histórico
+    // Manter no máximo MAX_HISTORICO_CONVERSAS mensagens
     if (historico.conversas.length > MAX_HISTORICO_CONVERSAS) {
+      // Adicionar log para saber quantas mensagens foram removidas
+      const antes = historico.conversas.length;
       historico.conversas = historico.conversas.slice(-MAX_HISTORICO_CONVERSAS);
+      logger.debug(`Limitando histórico de conversas: removidas ${antes - historico.conversas.length} mensagens antigas`);
+    }
+    
+    // Manter apenas mensagens dos últimos 7 dias
+    const seteDiasAtras = new Date();
+    seteDiasAtras.setDate(seteDiasAtras.getDate() - 7);
+    
+    // Filtrar conservando apenas mensagens dos últimos 7 dias
+    const mensagensAntesDoFiltro = historico.conversas.length;
+    historico.conversas = historico.conversas.filter(mensagem => {
+      const dataMensagem = new Date(mensagem.timestamp);
+      return dataMensagem >= seteDiasAtras;
+    });
+    
+    if (mensagensAntesDoFiltro > historico.conversas.length) {
+      logger.debug(`Removidas ${mensagensAntesDoFiltro - historico.conversas.length} mensagens com mais de 7 dias do histórico de ${historico.telefone}`);
     }
     
     const caminhoArquivo = obterCaminhoHistoricoConversa(historico.telefone);
     fs.writeFileSync(caminhoArquivo, JSON.stringify(historico, null, 2));
     
-    logger.info(`Histórico de conversa salvo para ${historico.telefone}`);
+    logger.debug(`Histórico de conversa salvo para ${historico.telefone} (${historico.conversas.length} mensagens)`);
     return true;
   } catch (erro) {
     logger.error(`Erro ao salvar histórico de conversa para ${historico.telefone}: ${erro.message}`);
@@ -117,13 +143,22 @@ function salvarHistoricoConversa(historico) {
 // Registrar um devocional enviado para um usuário
 function registrarDevocionalEnviado(telefone, devocional) {
   try {
+    // Carregar histórico existente para preservar conversas
     const historico = carregarHistoricoConversa(telefone);
     
-    // Registrar o devocional atual
+    // Manter as conversas anteriores e apenas atualizar o devocional
     historico.ultimoDevocional = {
       data: new Date().toISOString(),
       conteudo: devocional
     };
+    
+    // Adicionar uma entrada de sistema no histórico para marcar o envio do devocional
+    // Isso ajuda a contextualizar as conversas anteriores e posteriores
+    historico.conversas.push({
+      timestamp: new Date().toISOString(),
+      remetente: 'sistema',
+      mensagem: 'Novo devocional enviado'
+    });
     
     return salvarHistoricoConversa(historico);
   } catch (erro) {
@@ -181,7 +216,6 @@ async function isPrimeiraInteracao(telefone) {
     
     // Se o arquivo não existir, é a primeira interação
     if (!existeHistorico) {
-      logger.info(`Arquivo de histórico não encontrado para ${telefone}, é a primeira interação`);
       return true;
     }
     
@@ -192,12 +226,10 @@ async function isPrimeiraInteracao(telefone) {
       
       // Verificar se o histórico tem conversas
       if (!historico.conversas || historico.conversas.length === 0) {
-        logger.info(`Histórico vazio para ${telefone}, considerando como primeira interação`);
         return true;
       }
       
       // Se chegou aqui, não é a primeira interação
-      logger.info(`Usuário ${telefone} já tem histórico com ${historico.conversas.length} mensagens`);
       return false;
     } catch (erroLeitura) {
       logger.error(`Erro ao ler histórico para ${telefone}: ${erroLeitura.message}`);
@@ -264,8 +296,8 @@ async function gerarRespostaParaMensagem(telefone, mensagemUsuario) {
     // Registrar a mensagem do usuário
     registrarMensagem(telefone, 'usuario', mensagemUsuario);
     
-    // Verificar se a mensagem é uma pergunta ou comentário que precisa de resposta
-    if (!ePergunta(mensagemUsuario) && mensagemUsuario.length < 10) {
+    // Verificar se a mensagem é uma pergunta ou comentário que precisa de resposta elaborada
+    if (!ePergunta(mensagemUsuario) && mensagemUsuario.length < RESPOSTA_MINIMA_LENGTH) {
       const respostasSimples = [
         "Amém! Tenha um dia abençoado.",
         "Que Deus te abençoe hoje e sempre.",

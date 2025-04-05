@@ -1,4 +1,4 @@
-// Módulo de funções utilitárias
+// Módulo de funções utilitárias (Otimizado)
 
 const fs = require('fs-extra');
 const path = require('path');
@@ -9,37 +9,55 @@ moment.locale('pt-br');
 const BASE_CONHECIMENTO_DIR = process.env.BASE_CONHECIMENTO_DIR || './Base_de_conhecimento';
 const CONTATOS_DIR = process.env.CONTATOS_DIR || './Contatos';
 const HISTORICO_DIR = process.env.HISTORICO_DIR || './Histórico';
+const CONVERSAS_DIR = process.env.CONVERSAS_DIR || './Conversas';
 
-// Logger simples
+// Logger aprimorado com níveis de verbosidade
 const logger = {
-  info: (mensagem) => {
-    console.log(`[INFO] ${new Date().toISOString()} - ${mensagem}`);
-  },
-  warn: (mensagem) => {
-    console.warn(`[WARN] ${new Date().toISOString()} - ${mensagem}`);
-  },
+  // Configuração de nível de log (1=ERROR, 2=WARN, 3=INFO, 4=DEBUG, 5=TRACE)
+  level: parseInt(process.env.LOG_LEVEL || '3', 10),
+  
   error: (mensagem) => {
     console.error(`[ERROR] ${new Date().toISOString()} - ${mensagem}`);
+  },
+  
+  warn: (mensagem) => {
+    if (logger.level >= 2)
+      console.warn(`[WARN] ${new Date().toISOString()} - ${mensagem}`);
+  },
+  
+  info: (mensagem) => {
+    if (logger.level >= 3)
+      console.log(`[INFO] ${new Date().toISOString()} - ${mensagem}`);
+  },
+  
+  debug: (mensagem) => {
+    if (logger.level >= 4)
+      console.log(`[DEBUG] ${new Date().toISOString()} - ${mensagem}`);
+  },
+  
+  trace: (mensagem) => {
+    if (logger.level >= 5)
+      console.log(`[TRACE] ${new Date().toISOString()} - ${mensagem}`);
   }
 };
 
 // Criar diretórios necessários
 function criarDiretorios() {
   try {
-    [BASE_CONHECIMENTO_DIR, CONTATOS_DIR, HISTORICO_DIR].forEach(dir => {
+    const diretorios = [BASE_CONHECIMENTO_DIR, CONTATOS_DIR, HISTORICO_DIR, CONVERSAS_DIR];
+    
+    diretorios.forEach(dir => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
         logger.info(`Diretório criado: ${dir}`);
       }
     });
+    
+    return true;
   } catch (erro) {
     logger.error(`Erro ao criar diretórios: ${erro.message}`);
+    return false;
   }
-}
-
-// Verificar se um caminho existe
-function caminhoExiste(caminho) {
-  return fs.existsSync(caminho);
 }
 
 // Formatar data no estilo brasileiro (dia de mês de ano)
@@ -60,11 +78,6 @@ function limparString(texto) {
     .replace(/\s+/g, ' ')              // Substitui múltiplos espaços por um único
     .replace(/[^\w\s\-\.,;:!?'"()]/g, '') // Remove caracteres especiais (exceto pontuação básica)
     .trim();                           // Remove espaços no início e fim
-}
-
-// Escapar caracteres especiais para regex
-function escaparRegex(texto) {
-  return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // Gerar um ID único
@@ -100,12 +113,16 @@ async function retryAsync(funcao, tentativas = 3, intervalo = 1000) {
 module.exports = {
   logger,
   criarDiretorios,
-  caminhoExiste,
   formatarData,
   removerAcentos,
   limparString,
-  escaparRegex,
   gerarIdUnico,
   esperar,
-  retryAsync
+  retryAsync,
+  dirs: {
+    BASE_CONHECIMENTO_DIR,
+    CONTATOS_DIR,
+    HISTORICO_DIR,
+    CONVERSAS_DIR
+  }
 };

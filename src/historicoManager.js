@@ -1,4 +1,4 @@
-// Módulo para gerenciar o histórico de mensagens (carregamento e salvamento)
+// historicoManager.js - Corrija este arquivo
 
 const fs = require('fs-extra');
 const path = require('path');
@@ -7,6 +7,11 @@ const { logger } = require('./utils');
 // Configurações do histórico
 const HISTORICO_DIR = process.env.HISTORICO_DIR || './Histórico';
 const HISTORICO_FILE = process.env.HISTORICO_FILE || './Histórico/historico.json';
+const COMPACTAR_HISTORICO = process.env.HISTORICO_COMPACTO === 'true';
+
+// Cache em memória para evitar operações de IO frequentes
+let historicoCache = null;
+let ultimaAtualizacaoHistorico = null;
 
 // Garantir que o diretório do histórico exista
 function garantirDiretorioHistorico() {
@@ -16,17 +21,30 @@ function garantirDiretorioHistorico() {
   }
   
   if (!fs.existsSync(HISTORICO_FILE)) {
-    fs.writeFileSync(HISTORICO_FILE, JSON.stringify({
+    const historicoVazio = {
       ultimaAtualizacao: new Date().toISOString(),
       mensagens: []
-    }, null, 2));
+    };
+    fs.writeFileSync(HISTORICO_FILE, JSON.stringify(historicoVazio, null, 2));
     logger.info(`Arquivo de histórico criado: ${HISTORICO_FILE}`);
   }
 }
 
 // Carregar o histórico de mensagens
-function carregarHistorico() {
+function carregarHistorico(forcarReload = false) {
   try {
+    // Usar cache se disponível e não forçar reload
+    if (historicoCache && ultimaAtualizacaoHistorico && !forcarReload) {
+      const agora = new Date();
+      const diffMinutos = (agora - ultimaAtualizacaoHistorico) / (1000 * 60);
+      
+      // Usar cache se for recente (menos de 5 minutos)
+      if (diffMinutos < 5) {
+        logger.debug('Usando cache do histórico em memória');
+        return historicoCache;
+      }
+    }
+    
     garantirDiretorioHistorico();
     
     // Verificar se o arquivo existe e tem conteúdo válido
@@ -39,7 +57,7 @@ function carregarHistorico() {
           
           // Verificar se está no formato antigo (array)
           if (Array.isArray(historico)) {
-            logger.info('Detectado formato antigo do histórico, convertendo para o novo formato...');
+            logger.info('Detectado formato antigo do histórico, convertendo para o novo formato');
             
             // Converter para o novo formato
             const novoHistorico = {
@@ -50,7 +68,7 @@ function carregarHistorico() {
                 let referencia = '';
                 
                 if (item.verse) {
-                  const match = item.verse.match(/\"(.+?)\".*?\((.*?)\)/);
+                  const match = item.verse.match(/\"(.+?)\".*?\(([^)]+)\)/);
                   if (match && match.length >= 3) {
                     texto = match[1].trim();
                     referencia = match[2].trim();
@@ -72,8 +90,7 @@ function carregarHistorico() {
             };
             
             // Salvar no novo formato
-            fs.writeFileSync(HISTORICO_FILE, JSON.stringify(novoHistorico, null, 2));
-            logger.info('Arquivo de histórico convertido para o novo formato');
+            salvarHistorico(novoHistorico);
             
             return novoHistorico;
           }
@@ -82,6 +99,10 @@ function carregarHistorico() {
           if (!historico.mensagens) {
             historico.mensagens = [];
           }
+          
+          // Atualizar o cache
+          historicoCache = historico;
+          ultimaAtualizacaoHistorico = new Date();
           
           return historico;
         } catch (erroParseJson) {
@@ -97,7 +118,7 @@ function carregarHistorico() {
     };
     
     // Salvar o histórico vazio para garantir consistência
-    fs.writeFileSync(HISTORICO_FILE, JSON.stringify(historicoVazio, null, 2));
+    salvarHistorico(historicoVazio);
     
     return historicoVazio;
   } catch (erro) {
@@ -108,13 +129,6 @@ function carregarHistorico() {
       ultimaAtualizacao: new Date().toISOString(),
       mensagens: []
     };
-    
-    // Tentar salvar o histórico vazio
-    try {
-      fs.writeFileSync(HISTORICO_FILE, JSON.stringify(historicoVazio, null, 2));
-    } catch (erroSalvar) {
-      logger.error(`Erro ao salvar histórico vazio: ${erroSalvar.message}`);
-    }
     
     return historicoVazio;
   }
@@ -128,11 +142,18 @@ function salvarHistorico(historico) {
     // Atualizar a data da última atualização
     historico.ultimaAtualizacao = new Date().toISOString();
     
-    // Para debug
-    logger.info(`Salvando histórico com ${historico.mensagens.length} mensagens`);
+    // Atualizar o cache em memória
+    historicoCache = historico;
+    ultimaAtualizacaoHistorico = new Date();
     
-    fs.writeFileSync(HISTORICO_FILE, JSON.stringify(historico, null, 2));
-    logger.info('Histórico salvo com sucesso');
+    // Para debug
+    logger.debug(`Salvando histórico com ${historico.mensagens.length} mensagens`);
+    
+    // Opcionalmente compactar o histórico
+    const spacing = COMPACTAR_HISTORICO ? 0 : 2;
+    
+    fs.writeFileSync(HISTORICO_FILE, JSON.stringify(historico, null, spacing));
+    logger.debug('Histórico salvo com sucesso');
     
     return true;
   } catch (erro) {
@@ -141,8 +162,16 @@ function salvarHistorico(historico) {
   }
 }
 
+// Limpar o cache do histórico
+function limparCache() {
+  historicoCache = null;
+  ultimaAtualizacaoHistorico = null;
+  logger.debug('Cache do histórico limpo');
+}
+
 module.exports = {
   garantirDiretorioHistorico,
   carregarHistorico,
-  salvarHistorico
+  salvarHistorico,
+  limparCache
 };

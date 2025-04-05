@@ -1,4 +1,4 @@
-// Módulo para processamento dos documentos base
+// Módulo para processamento dos documentos base (Otimizado)
 
 const fs = require('fs-extra');
 const path = require('path');
@@ -11,25 +11,39 @@ const { logger } = require('./utils');
 // Diretório de documentos base
 const BASE_DIR = process.env.BASE_CONHECIMENTO_DIR || './Base_de_conhecimento';
 
-// Cache de documentos processados para evitar reprocessamento
-let documentosCache = null;
-let dataUltimaAtualizacao = null;
+// Cache de documentos processados
+const cacheInfo = {
+  conteudo: null,
+  ultimaAtualizacao: null,
+  arquivosProcessados: new Map(), // Map de arquivo -> timestamp da última modificação
+  valido: false
+};
 
 // Verificar a necessidade de atualização do cache
 function verificarCacheAtualizado() {
-  if (!documentosCache || !dataUltimaAtualizacao) {
+  if (!cacheInfo.conteudo || !cacheInfo.valido) {
     return false;
   }
   
-  // Verificar se algum arquivo foi modificado desde a última atualização
   try {
     const arquivos = obterArquivosBase();
     
+    // Verificar se a lista de arquivos mudou
+    const arquivosAtuais = new Set(arquivos);
+    const arquivosCached = new Set(cacheInfo.arquivosProcessados.keys());
+    
+    if (arquivosAtuais.size !== arquivosCached.size) {
+      return false;
+    }
+    
+    // Verificar se algum arquivo foi modificado
     for (const arquivo of arquivos) {
       const caminhoArquivo = path.join(BASE_DIR, arquivo);
       const stats = fs.statSync(caminhoArquivo);
       
-      if (stats.mtime > dataUltimaAtualizacao) {
+      // Verificar se o arquivo está no cache e se foi modificado
+      const ultimaModificacaoCache = cacheInfo.arquivosProcessados.get(arquivo);
+      if (!ultimaModificacaoCache || stats.mtime > ultimaModificacaoCache) {
         return false;
       }
     }
@@ -44,6 +58,12 @@ function verificarCacheAtualizado() {
 // Obter a lista de arquivos da base de conhecimento
 function obterArquivosBase() {
   try {
+    if (!fs.existsSync(BASE_DIR)) {
+      fs.mkdirSync(BASE_DIR, { recursive: true });
+      logger.info(`Diretório de base de conhecimento criado: ${BASE_DIR}`);
+      return [];
+    }
+    
     const arquivos = fs.readdirSync(BASE_DIR);
     return arquivos.filter(arquivo => {
       const extensao = path.extname(arquivo).toLowerCase();
@@ -62,7 +82,7 @@ async function processarPdf(caminhoArquivo) {
     const data = await pdfParse(dataBuffer);
     return data.text;
   } catch (erro) {
-    logger.error(`Erro ao processar PDF ${caminhoArquivo}: ${erro.message}`);
+    logger.error(`Erro ao processar PDF ${path.basename(caminhoArquivo)}: ${erro.message}`);
     return '';
   }
 }
@@ -73,10 +93,10 @@ function processarJson(caminhoArquivo) {
     const conteudo = fs.readFileSync(caminhoArquivo, 'utf8');
     const data = JSON.parse(conteudo);
     
-    // Extrair textos do JSON (considerando diferentes estruturas possíveis)
+    // Extrair textos do JSON
     return extrairTextosJson(data);
   } catch (erro) {
-    logger.error(`Erro ao processar JSON ${caminhoArquivo}: ${erro.message}`);
+    logger.error(`Erro ao processar JSON ${path.basename(caminhoArquivo)}: ${erro.message}`);
     return '';
   }
 }
@@ -101,7 +121,7 @@ function processarTxt(caminhoArquivo) {
   try {
     return fs.readFileSync(caminhoArquivo, 'utf8');
   } catch (erro) {
-    logger.error(`Erro ao processar TXT ${caminhoArquivo}: ${erro.message}`);
+    logger.error(`Erro ao processar TXT ${path.basename(caminhoArquivo)}: ${erro.message}`);
     return '';
   }
 }
@@ -120,7 +140,7 @@ async function processarCsv(caminhoArquivo) {
         resolve(linhas.join('\n'));
       })
       .on('error', (erro) => {
-        logger.error(`Erro ao processar CSV ${caminhoArquivo}: ${erro.message}`);
+        logger.error(`Erro ao processar CSV ${path.basename(caminhoArquivo)}: ${erro.message}`);
         reject(erro);
       });
   });
@@ -143,7 +163,7 @@ function processarExcel(caminhoArquivo) {
     
     return resultado.join('\n');
   } catch (erro) {
-    logger.error(`Erro ao processar Excel ${caminhoArquivo}: ${erro.message}`);
+    logger.error(`Erro ao processar Excel ${path.basename(caminhoArquivo)}: ${erro.message}`);
     return '';
   }
 }
@@ -164,12 +184,58 @@ function processarHtml(conteudo) {
   }
 }
 
+// Processar um arquivo baseado na sua extensão
+async function processarArquivo(arquivo) {
+  const caminhoArquivo = path.join(BASE_DIR, arquivo);
+  const extensao = path.extname(arquivo).toLowerCase();
+  let conteudo = '';
+  
+  try {
+    logger.debug(`Processando arquivo: ${arquivo}`);
+    
+    switch (extensao) {
+      case '.pdf':
+        conteudo = await processarPdf(caminhoArquivo);
+        break;
+      case '.json':
+        conteudo = processarJson(caminhoArquivo);
+        break;
+      case '.txt':
+        conteudo = processarTxt(caminhoArquivo);
+        break;
+      case '.csv':
+        conteudo = await processarCsv(caminhoArquivo);
+        break;
+      case '.xlsx':
+        conteudo = processarExcel(caminhoArquivo);
+        break;
+      default:
+        logger.warn(`Tipo de arquivo não suportado: ${extensao}`);
+        return '';
+    }
+    
+    // Verificar se o conteúdo pode conter HTML e processá-lo se necessário
+    if (conteudo.includes('<html') || conteudo.includes('<body') || conteudo.includes('<div')) {
+      conteudo = processarHtml(conteudo);
+    }
+    
+    // Atualizar o cache
+    const stats = fs.statSync(caminhoArquivo);
+    cacheInfo.arquivosProcessados.set(arquivo, stats.mtime);
+    
+    return conteudo;
+  } catch (erro) {
+    logger.error(`Erro ao processar arquivo ${arquivo}: ${erro.message}`);
+    return '';
+  }
+}
+
 // Obter todo o conteúdo da base de conhecimento
 async function obterConteudoBase() {
   // Verificar se o cache está atualizado
   if (verificarCacheAtualizado()) {
-    logger.info('Usando cache da base de conhecimento (sem alterações desde a última leitura)');
-    return documentosCache;
+    logger.debug('Usando cache da base de conhecimento');
+    return cacheInfo.conteudo;
   }
   
   try {
@@ -177,53 +243,30 @@ async function obterConteudoBase() {
     
     if (arquivos.length === 0) {
       logger.warn('Nenhum arquivo encontrado na base de conhecimento');
+      
+      // Atualizar o cache mesmo vazio
+      cacheInfo.conteudo = '';
+      cacheInfo.ultimaAtualizacao = new Date();
+      cacheInfo.valido = true;
+      cacheInfo.arquivosProcessados.clear();
+      
       return '';
     }
     
-    logger.info(`Processando ${arquivos.length} arquivos da base de conhecimento...`);
+    logger.info(`Processando ${arquivos.length} arquivos da base de conhecimento`);
     
-    let conteudoCompleto = '';
+    // Processar todos os arquivos em paralelo para melhor desempenho
+    const conteudos = await Promise.all(
+      arquivos.map(arquivo => processarArquivo(arquivo))
+    );
     
-    for (const arquivo of arquivos) {
-      const caminhoArquivo = path.join(BASE_DIR, arquivo);
-      const extensao = path.extname(arquivo).toLowerCase();
-      
-      logger.info(`Processando arquivo: ${arquivo}`);
-      
-      let conteudo = '';
-      
-      switch (extensao) {
-        case '.pdf':
-          conteudo = await processarPdf(caminhoArquivo);
-          break;
-        case '.json':
-          conteudo = processarJson(caminhoArquivo);
-          break;
-        case '.txt':
-          conteudo = processarTxt(caminhoArquivo);
-          break;
-        case '.csv':
-          conteudo = await processarCsv(caminhoArquivo);
-          break;
-        case '.xlsx':
-          conteudo = processarExcel(caminhoArquivo);
-          break;
-        default:
-          logger.warn(`Tipo de arquivo não suportado: ${extensao}`);
-          continue;
-      }
-      
-      // Verificar se o conteúdo pode conter HTML e processá-lo se necessário
-      if (conteudo.includes('<html') || conteudo.includes('<body') || conteudo.includes('<div')) {
-        conteudo = processarHtml(conteudo);
-      }
-      
-      conteudoCompleto += conteudo + '\n\n';
-    }
+    // Combinar todos os conteúdos
+    const conteudoCompleto = conteudos.join('\n\n');
     
     // Atualizar o cache
-    documentosCache = conteudoCompleto;
-    dataUltimaAtualizacao = new Date();
+    cacheInfo.conteudo = conteudoCompleto;
+    cacheInfo.ultimaAtualizacao = new Date();
+    cacheInfo.valido = true;
     
     logger.info('Base de conhecimento processada com sucesso');
     return conteudoCompleto;
@@ -233,6 +276,16 @@ async function obterConteudoBase() {
   }
 }
 
+// Limpar o cache forçadamente
+function limparCache() {
+  cacheInfo.conteudo = null;
+  cacheInfo.ultimaAtualizacao = null;
+  cacheInfo.valido = false;
+  cacheInfo.arquivosProcessados.clear();
+  logger.debug('Cache da base de conhecimento limpo');
+}
+
 module.exports = {
-  obterConteudoBase
+  obterConteudoBase,
+  limparCache
 };

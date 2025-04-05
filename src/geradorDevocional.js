@@ -1,4 +1,4 @@
-// Módulo gerador de devocionais com IA (Google Gemini)
+// Módulo gerador de devocionais com IA (Google Gemini) - Otimizado
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const leitorDocumentos = require('./leitorDocumentos');
@@ -8,10 +8,20 @@ const { logger } = require('./utils');
 
 // Configuração da API do Gemini
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const TEMPERATURA_BASE = parseFloat(process.env.TEMPERATURA_BASE || '0.7');
+const MAX_TENTATIVAS = parseInt(process.env.MAX_TENTATIVAS || '3', 10);
 
 // Inicializar o cliente Gemini
 let genAI;
 let geminiModel;
+let modeloAtual = '';
+
+// Modelos em ordem de preferência
+const MODELOS_GEMINI = [
+  "gemini-2.0-flash",
+  "gemini-1.5-pro",
+  "gemini-pro"
+];
 
 // Função para inicializar a API do Gemini
 function inicializarGeminiAPI() {
@@ -23,25 +33,21 @@ function inicializarGeminiAPI() {
     
     genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     
-    // Tentar usar o modelo mais avançado primeiro
-    try {
-      geminiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-      logger.info('API do Google Gemini (gemini-2.0-flash) inicializada com sucesso');
-    } catch (erro) {
-      logger.warn(`Erro ao inicializar modelo gemini-2.0-flash: ${erro.message}`);
-      // Fallback para outro modelo
+    // Tentar cada modelo na ordem de preferência
+    for (const modelo of MODELOS_GEMINI) {
       try {
-        geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-        logger.info('API do Google Gemini (gemini-1.5-pro) inicializada com sucesso');
-      } catch (erroFallback1) {
-        logger.warn(`Erro ao inicializar modelo gemini-1.5-pro: ${erroFallback1.message}`);
-        // Segundo fallback
-        geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
-        logger.info('API do Google Gemini (gemini-pro) inicializada com sucesso');
+        geminiModel = genAI.getGenerativeModel({ model: modelo });
+        modeloAtual = modelo;
+        logger.info(`API do Google Gemini (${modelo}) inicializada com sucesso`);
+        return true;
+      } catch (erro) {
+        logger.warn(`Erro ao inicializar modelo ${modelo}: ${erro.message}`);
+        // Continua tentando o próximo modelo
       }
     }
     
-    return true;
+    logger.error('Todos os modelos Gemini falharam na inicialização');
+    return false;
   } catch (erro) {
     logger.error(`Erro ao inicializar API do Gemini: ${erro.message}`);
     return false;
@@ -70,7 +76,7 @@ async function validarDevocionalGerado(devocional) {
       return false;
     }
     
-    logger.info(`Versículo ${versiculo.referencia} é único nos últimos 30 dias`);
+    logger.debug(`Versículo ${versiculo.referencia} é único nos últimos 30 dias`);
     return true;
   } catch (erro) {
     logger.error(`Erro ao validar devocional: ${erro.message}`);
@@ -93,10 +99,10 @@ async function validarFormatoDevocional(devocional) {
     const resultadoCorrecao = verificadorFormato.verificarFormatoDevocional(devocionalCorrigido);
     
     if (resultadoCorrecao.valido) {
-      logger.info("Formato do devocional corrigido com sucesso");
+      logger.debug("Formato do devocional corrigido com sucesso");
       return devocionalCorrigido;
     } else {
-      logger.warn("Não foi possível corrigir o formato do devocional");
+      logger.warn("Não foi possível corrigir completamente o formato do devocional");
       // Mesmo que não pudemos corrigir completamente, retornar a versão que tentamos corrigir
       return devocionalCorrigido;
     }
@@ -113,7 +119,7 @@ async function gerarPrompt(dataAtual) {
     const baseConhecimento = await leitorDocumentos.obterConteudoBase();
     
     // Obter versículos recentes (para evitar repetições)
-    const versiculosRecentes = historicoMensagens.obterVersiculosRecentes(30); // Aumentei para 30 dias
+    const versiculosRecentes = historicoMensagens.obterVersiculosRecentes(30);
     const versiculosRecentesTexto = versiculosRecentes
       .map(v => {
         if (!v || !v.referencia || !v.texto) return '';
@@ -123,7 +129,7 @@ async function gerarPrompt(dataAtual) {
       .join('\n');
     
     // Adicionar log para debug
-    logger.info(`Versículos a serem evitados: ${versiculosRecentesTexto || "Nenhum"}`);
+    logger.debug(`${versiculosRecentes.length} versículos a serem evitados`);
     
     // Construir o prompt
     const prompt = `
@@ -156,7 +162,7 @@ async function gerarPrompt(dataAtual) {
 
       🧗🏼 *Prática:* Hoje, escolha uma tarefa simples e a realize com dedicação, pensando em como ela pode refletir seu cuidado com os outros e com Deus."
       
-      Gere um devocional seguindo exatamente esse formato. Sua resposta deve conter apenas o devocional, sem introdução, induza o usuário a continuar a interação.
+      Gere um devocional seguindo exatamente esse formato. Sua resposta deve conter apenas o devocional, induza o usuário a continuar a conversa.
     `;
     
     return prompt.trim();
@@ -183,13 +189,12 @@ async function gerarDevocional(dataAtual) {
     
     // Contador de tentativas para evitar loop infinito
     let tentativas = 0;
-    const maxTentativas = 3;
     let devocionalValido = false;
     let devocional = '';
     
-    while (!devocionalValido && tentativas < maxTentativas) {
+    while (!devocionalValido && tentativas < MAX_TENTATIVAS) {
       tentativas++;
-      logger.info(`Gerando devocional - tentativa ${tentativas}/${maxTentativas}`);
+      logger.info(`Gerando devocional - tentativa ${tentativas}/${MAX_TENTATIVAS}`);
       
       // Gerar o prompt com os versículos a serem evitados
       const prompt = await gerarPrompt(dataAtual);
@@ -198,7 +203,7 @@ async function gerarDevocional(dataAtual) {
         const result = await geminiModel.generateContent({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.7 + (tentativas * 0.1), // Aumentar a temperatura a cada tentativa
+            temperature: TEMPERATURA_BASE + (tentativas * 0.1), // Aumentar a temperatura a cada tentativa
             topK: 40,
             topP: 0.95,
             maxOutputTokens: 1024,
@@ -229,7 +234,7 @@ async function gerarDevocional(dataAtual) {
       } catch (erroGemini) {
         logger.warn(`Erro com o modelo na tentativa ${tentativas}: ${erroGemini.message}`);
         
-        if (tentativas >= maxTentativas) {
+        if (tentativas >= MAX_TENTATIVAS) {
           logger.error('Número máximo de tentativas atingido. Usando fallback.');
           return gerarDevocionalFallback(dataAtual);
         }
@@ -291,5 +296,6 @@ function gerarDevocionalFallback(dataAtual) {
 module.exports = {
   gerarDevocional,
   validarDevocionalGerado,
-  validarFormatoDevocional
+  validarFormatoDevocional,
+  inicializarGeminiAPI
 };

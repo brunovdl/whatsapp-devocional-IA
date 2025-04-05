@@ -1,0 +1,40 @@
+{
+  "telefone": "5516991847619",
+  "ultimaAtualizacao": "2025-04-04T17:21:13.441Z",
+  "ultimoDevocional": {
+    "data": "2025-04-04T17:20:37.837Z",
+    "conteudo": "📅 4 de abril de 2025\n\n📖 *Versículo:* \"Confia no Senhor de todo o teu coração e não te estribes no teu próprio entendimento.\" (Provérbios 3:5)\n\n💭 *Reflexão:* Este versículo nos convida a depositar nossa fé em Deus, mesmo quando não compreendemos o que acontece ao nosso redor. A vida nos apresenta desafios e incertezas, e é natural buscarmos soluções racionais. No entanto, Provérbios nos lembra que a sabedoria divina transcende a nossa compreensão limitada. Ao confiarmos em Deus, abrimos espaço para que Ele nos guie e nos fortaleça em cada passo.\n\n🧗🏼 *Prática:* Reserve um momento hoje para orar e entregar suas preocupações a Deus, buscando Sua orientação em todas as decisões. Confie que Ele tem o melhor para você, mesmo que o caminho pareça incerto."
+  },
+  "conversas": [
+    {
+      "timestamp": "2025-04-04T17:16:53.063Z",
+      "remetente": "sistema",
+      "mensagem": "Novo devocional enviado"
+    },
+    {
+      "timestamp": "2025-04-04T17:17:36.983Z",
+      "remetente": "usuario",
+      "mensagem": "Como eu posso enxergar a bondade de Deus?"
+    },
+    {
+      "timestamp": "2025-04-04T17:17:38.036Z",
+      "remetente": "bot",
+      "mensagem": "Agradeço sua mensagem. Estou refletindo sobre isso e logo poderei responder com mais clareza. Que Deus abençoe seu dia."
+    },
+    {
+      "timestamp": "2025-04-04T17:20:37.837Z",
+      "remetente": "sistema",
+      "mensagem": "Novo devocional enviado"
+    },
+    {
+      "timestamp": "2025-04-04T17:21:11.422Z",
+      "remetente": "usuario",
+      "mensagem": "Como eu posso entregar as minhas preocupações a Deus?"
+    },
+    {
+      "timestamp": "2025-04-04T17:21:13.440Z",
+      "remetente": "bot",
+      "mensagem": "Entregar suas preocupações a Deus é um ato de fé e confiança. Comece reconhecendo suas preocupações em oração, pedindo a Ele força e sabedoria para lidar com elas. Lembre-se do versículo de hoje: confie no Senhor de todo o seu coração. Ao fazer isso, você abre espaço para que a paz de Deus, que excede todo o entendimento, guarde seu coração e sua mente (Filipenses 4:7)."
+    }
+  ]
+}

@@ -1,8 +1,7 @@
-// WhatsApp Devocional Diário com IA
+// WhatsApp Devocional Diário com IA (Otimizado)
 // Ponto de entrada da aplicação
 
 require('dotenv').config();
-const fs = require('fs-extra');
 const schedule = require('node-schedule');
 const moment = require('moment');
 moment.locale('pt-br');
@@ -14,44 +13,67 @@ const leitorContatos = require('./leitorContatos');
 const historicoMensagens = require('./historicoMensagens');
 const conversasHandler = require('./conversasHandler');
 const leitorDocumentos = require('./leitorDocumentos');
-const { criarDiretorios, formatarData, logger } = require('./utils');
+const { criarDiretorios, formatarData, logger, esperar } = require('./utils');
 
 // Garantir que os diretórios necessários existam
 criarDiretorios();
 
+// Configurações
+const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '07:00';
+const ENVIAR_IMEDIATAMENTE = process.env.ENVIAR_IMEDIATAMENTE === 'true';
+const RETRY_INTERVAL = parseInt(process.env.RETRY_INTERVAL || '300000', 10); // 5 minutos em ms
+
+
+// Contador global de erros de conexão
+let errosConexaoGlobal = 0;
+const MAX_ERROS_CONEXAO = 3;
+
+// Flag para controlar as tentativas de envio
+let envioEmAndamento = false;
+let ultimoEnvioFalhou = false;
+
 // Função principal que executa o envio dos devocionais
 async function enviarDevocionaisDiarios() {
   try {
+    // Evitar múltiplas chamadas simultâneas
+    if (envioEmAndamento) {
+      logger.warn('Envio já está em andamento. Ignorando chamada duplicada.');
+      return;
+    }
+    
+    envioEmAndamento = true;
     logger.info('Iniciando o processo de envio de devocionais diários');
     
     // Obter a data atual formatada
     const dataAtual = formatarData(new Date());
-    logger.info(`Data atual: ${dataAtual}`);
     
     // Gerar o devocional do dia
     logger.info('Gerando devocional...');
     const devocional = await geradorDevocional.gerarDevocional(dataAtual);
     logger.info('Devocional gerado com sucesso');
     
+    // Extrair o versículo para registro (uma única vez)
+    const versiculo = historicoMensagens.extrairVersiculo(devocional);
+    
     // IMPORTANTE: Registrar o devocional no histórico ANTES de enviá-lo
-    logger.info('Registrando devocional no histórico geral...');
     const registroSucesso = historicoMensagens.registrarEnvio({
       data: dataAtual,
       devocional: devocional,
+      versiculo: versiculo,
       totalContatos: 0, // Será atualizado depois
       enviosComSucesso: 0 // Será atualizado depois
     });
     
-    if (registroSucesso) {
-      logger.info('Devocional registrado com sucesso no histórico geral');
-    } else {
+    if (!registroSucesso) {
       logger.error('Falha ao registrar devocional no histórico geral');
     }
     
     // Verificar se o cliente WhatsApp está pronto
     if (!whatsapp.clientePronto()) {
-      logger.error('Cliente WhatsApp não está pronto. Tentando novamente em 5 minutos.');
-      setTimeout(enviarDevocionaisDiarios, 5 * 60 * 1000);
+      logger.error('Cliente WhatsApp não está pronto. Agendando nova tentativa...');
+      ultimoEnvioFalhou = true;
+      envioEmAndamento = false;
+      setTimeout(enviarDevocionaisDiarios, RETRY_INTERVAL);
       return;
     }
     
@@ -60,56 +82,63 @@ async function enviarDevocionaisDiarios() {
     const contatos = await leitorContatos.obterContatos();
     logger.info(`${contatos.length} contatos encontrados`);
     
-    // Enviar o devocional para cada contato
+    if (contatos.length === 0) {
+      logger.warn('Nenhum contato para enviar devocional. Verificar arquivo de contatos.');
+      envioEmAndamento = false;
+      return;
+    }
+    
+    // Enviar o devocional para cada contato, com controle de falhas
     let enviosComSucesso = 0;
     
     for (const contato of contatos) {
       try {
-        logger.info(`Enviando devocional para ${contato.nome} (${contato.telefone})...`);
+        logger.debug(`Enviando devocional para ${contato.nome} (${contato.telefone})...`);
         await whatsapp.enviarMensagem(contato.telefone, devocional);
         
         // Registrar o devocional enviado para referência em conversas futuras
         await conversasHandler.registrarDevocionalEnviado(contato.telefone, devocional);
         
         enviosComSucesso++;
-        logger.info(`Devocional enviado com sucesso para ${contato.nome}`);
       } catch (erro) {
         logger.error(`Erro ao enviar devocional para ${contato.nome}: ${erro.message}`);
+        // Continuar com os próximos contatos mesmo com falha
       }
+      
+      // Pequena pausa entre envios para não sobrecarregar
+      await esperar(300);
     }
     
     // Atualizar o histórico com os números finais
-    logger.info('Atualizando dados no histórico...');
     historicoMensagens.registrarEnvio({
       data: dataAtual,
       devocional: devocional,
+      versiculo: versiculo,
       totalContatos: contatos.length,
       enviosComSucesso: enviosComSucesso
     });
     
     logger.info(`Processo concluído. Enviado para ${enviosComSucesso}/${contatos.length} contatos.`);
     
-    // Verificar o versículo que foi enviado (para debug)
-    const versiculo = historicoMensagens.extrairVersiculo(devocional);
     if (versiculo) {
       logger.info(`Versículo enviado hoje: ${versiculo.referencia} - "${versiculo.texto}"`);
-    } else {
-      logger.warn('Não foi possível extrair o versículo do devocional enviado');
     }
     
-    // Para garantir que o sistema tenha o devocional disponível imediatamente após envio,
-    // verificar se o devocional pode ser recuperado do histórico
-    logger.info('Verificando se o devocional pode ser recuperado do histórico...');
+    // Verificar se o devocional pode ser recuperado do histórico (validação)
     const devocionalRecuperado = await historicoMensagens.obterUltimoDevocionalEnviado();
-    if (devocionalRecuperado) {
-      logger.info('Devocional pode ser recuperado do histórico com sucesso');
-    } else {
-      logger.error('PROBLEMA CRÍTICO: Não foi possível recuperar o devocional do histórico após registro');
+    if (!devocionalRecuperado) {
+      logger.error('PROBLEMA: Não foi possível recuperar o devocional do histórico após registro');
     }
     
+    ultimoEnvioFalhou = false;
+    envioEmAndamento = false;
   } catch (erro) {
     logger.error(`Erro ao executar o processo de envio: ${erro.message}`);
-    logger.error(erro.stack);
+    ultimoEnvioFalhou = true;
+    envioEmAndamento = false;
+    
+    // Tentar novamente após intervalo de falha
+    setTimeout(enviarDevocionaisDiarios, RETRY_INTERVAL);
   }
 }
 
@@ -118,7 +147,8 @@ async function preprocessarBaseConhecimento() {
   try {
     logger.info('Iniciando pré-processamento da base de conhecimento...');
     const conteudoBase = await leitorDocumentos.obterConteudoBase();
-    logger.info(`Base de conhecimento processada: ${conteudoBase.length} caracteres`);
+    const tamanhoBase = Math.round(conteudoBase.length / 1024);
+    logger.info(`Base de conhecimento processada: ${tamanhoBase} KB`);
     return true;
   } catch (erro) {
     logger.error(`Erro ao processar base de conhecimento: ${erro.message}`);
@@ -126,43 +156,94 @@ async function preprocessarBaseConhecimento() {
   }
 }
 
+// Deteção e recuperação de falhas persistentes de conexão
+function verificarProblemasConexao() {
+  if (!whatsapp.clientePronto()) {
+    errosConexaoGlobal++;
+    
+    if (errosConexaoGlobal >= MAX_ERROS_CONEXAO) {
+      logger.error(`Detectados ${errosConexaoGlobal} erros consecutivos de conexão. Tentando recuperação de emergência...`);
+      
+      // Limpar completamente a sessão e reiniciar
+      whatsapp.limparSessao().then(() => {
+        logger.info('Sessão limpa. Reiniciando cliente em 10 segundos...');
+        setTimeout(() => {
+          // Reiniciar cliente do zero
+          whatsapp.iniciarCliente();
+        }, 10000);
+      });
+      
+      // Resetar contador
+      errosConexaoGlobal = 0;
+    }
+  } else {
+    // Resetar contador quando a conexão está ok
+    errosConexaoGlobal = 0;
+  }
+}
+
+// Verificar a cada 5 minutos se há problemas persistentes
+setInterval(verificarProblemasConexao, 5 * 60 * 1000);
+
 // Inicialização do sistema
 async function iniciarSistema() {
   try {
     logger.info('Iniciando o sistema WhatsApp Devocional IA...');
     
-    // Primeiro, processar a base de conhecimento
-    logger.info('Processando base de conhecimento...');
-    const baseProcessada = await preprocessarBaseConhecimento();
+    // Processar a base de conhecimento em segundo plano
+    preprocessarBaseConhecimento().then(sucesso => {
+      if (!sucesso) {
+        logger.warn('Houve um problema no processamento da base de conhecimento, mas o sistema continuará.');
+      }
+    });
     
-    if (!baseProcessada) {
-      logger.warn('Houve um problema no processamento da base de conhecimento, mas o sistema continuará.');
-    }
-    
-    // Depois, iniciar o cliente WhatsApp
+    // Iniciar o cliente WhatsApp
     logger.info('Inicializando conexão com WhatsApp...');
     await whatsapp.iniciarCliente();
     
+    // NOVO: Aguardar até que a conexão seja estabelecida
+    logger.info('Aguardando que você escaneie o QR code e a conexão seja estabelecida...');
+    try {
+      await whatsapp.aguardarConexao(600000); // 10 minutos para estabelecer a conexão
+      logger.info('Conexão WhatsApp estabelecida com sucesso!');
+    } catch (erroConexao) {
+      logger.error(`Erro ao estabelecer conexão: ${erroConexao.message}`);
+      logger.info('Tentando novamente em alguns minutos...');
+      setTimeout(iniciarSistema, RETRY_INTERVAL);
+      return;
+    }
+    
     // Agendar o envio diário de devocionais no horário configurado
-    const horarioEnvio = process.env.SCHEDULE_TIME || '07:00';
-    const [hora, minuto] = horarioEnvio.split(':').map(Number);
+    const [hora, minuto] = SCHEDULE_TIME.split(':').map(Number);
     
     schedule.scheduleJob(`${minuto} ${hora} * * *`, async () => {
-      logger.info('Executando tarefa agendada de envio de devocionais');
-      await enviarDevocionaisDiarios();
+      logger.info(`Executando tarefa agendada de envio de devocionais (${SCHEDULE_TIME})`);
+      // Verificar se o WhatsApp está conectado antes de prosseguir
+      if (whatsapp.clientePronto()) {
+        await enviarDevocionaisDiarios();
+      } else {
+        logger.error('Cliente WhatsApp não está pronto para envio do devocional agendado');
+      }
     });
     
-    logger.info(`Sistema iniciado. Devocionais serão enviados diariamente às ${horarioEnvio}`);
+    logger.info(`Sistema iniciado. Devocionais serão enviados diariamente às ${SCHEDULE_TIME}`);
     
-    // Para desenvolvimento/testes: Descomentar para enviar um devocional imediatamente
-    const enviarImediatamente = process.env.ENVIAR_IMEDIATAMENTE === 'true';
-    if (enviarImediatamente) {
-      logger.info('Configurado para enviar devocional imediatamente. Iniciando envio em 10 segundos...');
-      setTimeout(enviarDevocionaisDiarios, 10000);
+    // Para desenvolvimento/testes: enviar um devocional imediatamente se configurado
+    if (ENVIAR_IMEDIATAMENTE) {
+      logger.info('Configurado para enviar devocional imediatamente. Verificando se cliente está pronto...');
+      // Verificar novamente se o cliente está pronto antes de enviar
+      if (whatsapp.clientePronto()) {
+        logger.info('Cliente pronto. Iniciando envio em 10 segundos...');
+        setTimeout(enviarDevocionaisDiarios, 10000);
+      } else {
+        logger.warn('Cliente WhatsApp não está pronto. O envio imediato não será realizado.');
+      }
     }
   } catch (erro) {
     logger.error(`Erro ao iniciar o sistema: ${erro.message}`);
-    logger.error(erro.stack);
+    
+    // Tentar reiniciar o sistema após um intervalo em caso de falha inicial
+    setTimeout(iniciarSistema, RETRY_INTERVAL);
   }
 }
 
@@ -174,4 +255,15 @@ process.on('SIGINT', async () => {
   logger.info('Encerrando o sistema...');
   await whatsapp.encerrarCliente();
   process.exit(0);
+});
+
+// Tratamento de erros não capturados
+process.on('uncaughtException', (erro) => {
+  logger.error(`Erro não capturado: ${erro.message}`);
+  logger.error(erro.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Promessa rejeitada não tratada:');
+  logger.error(reason);
 });

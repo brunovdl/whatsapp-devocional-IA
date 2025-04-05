@@ -1,5 +1,4 @@
-// Script para verificar o formato do devocional e garantir que ele seja consistente
-// Adicione este arquivo como src/verificadorFormato.js
+// Módulo para verificar e corrigir o formato do devocional (Otimizado)
 
 const { logger } = require('./utils');
 
@@ -7,7 +6,6 @@ const { logger } = require('./utils');
 function verificarFormatoDevocional(devocional) {
   try {
     if (!devocional) {
-      logger.warn('Devocional vazio ou nulo');
       return { valido: false, mensagem: 'Devocional vazio ou nulo' };
     }
     
@@ -21,11 +19,10 @@ function verificarFormatoDevocional(devocional) {
     const temReferenciaBiblica = /\([A-Za-záàâãéèêíïóôõöúçñÁÀÂÃÉÈÍÏÓÔÕÖÚÇÑ]+ \d+:\d+(?:-\d+)?\)/i.test(devocional);
     
     // Verificar a presença de texto entre aspas (versículo)
-    const temTextoEntreAspas = /"[^"]+"/i.test(devocional);
+    const temTextoEntreAspas = /\"[^\"]+\"/i.test(devocional);
     
     // Log detalhado para debug
-    logger.info(`Verificação de formato: data=${temData}, versículo=${temVersiculo}, reflexão=${temReflexao}, prática=${temPratica}`);
-    logger.info(`Verificação de formato: referência bíblica=${temReferenciaBiblica}, texto entre aspas=${temTextoEntreAspas}`);
+    logger.debug(`Verificação de formato: data=${temData}, versículo=${temVersiculo}, reflexão=${temReflexao}, prática=${temPratica}, referência=${temReferenciaBiblica}, aspas=${temTextoEntreAspas}`);
     
     // Todos os elementos devem estar presentes
     const valido = temData && temVersiculo && temReflexao && temPratica && temReferenciaBiblica && temTextoEntreAspas;
@@ -98,7 +95,7 @@ function corrigirFormatoDevocional(devocional) {
       if (!versiculoLinha.includes('*Versículo:*')) {
         const formatado = versiculoLinha
           .replace(/^\s*📖\s*/, '')
-          .replace(/versículo:|\*versículo\*:|versículo|versiculo/i, '*Versículo:*')
+          .replace(/versículo:|\\*versículo\\*:|versículo|versiculo/i, '*Versículo:*')
           .trim();
         devocionalCorrigido += '📖 ' + formatado + '\n\n';
       } else {
@@ -111,7 +108,7 @@ function corrigirFormatoDevocional(devocional) {
       if (!reflexaoLinha.includes('*Reflexão:*')) {
         const formatado = reflexaoLinha
           .replace(/^\s*💭\s*/, '')
-          .replace(/reflexão:|\*reflexão\*:|reflexão|reflexao/i, '*Reflexão:*')
+          .replace(/reflexão:|\\*reflexão\\*:|reflexão|reflexao/i, '*Reflexão:*')
           .trim();
         devocionalCorrigido += '💭 ' + formatado + '\n\n';
       } else {
@@ -124,7 +121,7 @@ function corrigirFormatoDevocional(devocional) {
       if (!praticaLinha.includes('*Prática:*')) {
         const formatado = praticaLinha
           .replace(/^\s*🧗🏼\s*/, '')
-          .replace(/prática:|\*prática\*:|prática|pratica/i, '*Prática:*')
+          .replace(/prática:|\\*prática\\*:|prática|pratica/i, '*Prática:*')
           .trim();
         devocionalCorrigido += '🧗🏼 ' + formatado;
       } else {
@@ -134,7 +131,7 @@ function corrigirFormatoDevocional(devocional) {
     
     // Se conseguiu corrigir o formato, retorne o devocional corrigido
     if (devocionalCorrigido.trim()) {
-      logger.info('Formato do devocional corrigido com sucesso');
+      logger.debug('Formato do devocional corrigido com sucesso');
       return devocionalCorrigido;
     } else {
       logger.warn('Não foi possível corrigir o formato do devocional');
